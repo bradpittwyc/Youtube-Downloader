@@ -414,14 +414,14 @@ function renderQueue() {
     if (q.status === 'queued') buttons.push(['pause', '暂停', '']);
     if (q.status === 'paused' || q.status === 'canceled') buttons.push(['resume', '继续', '从断点继续下载']);
     if (q.status === 'error') buttons.push(['retry', '重试', '']);
-    if (q.status === 'done' || q.status === 'skipped') buttons.push(['open', '打开', '打开所在文件夹']);
-    if (q.audioPath) buttons.push(['openAudio', '音频', '定位导出的音频文件']);
-    if (q.subCount > 0) buttons.push(['openSubs', `字幕${q.subCount}`, `定位字幕文件（共 ${q.subCount} 个）`]);
-    if (q.biSrtPath) buttons.push(['openBiSrt', '双语', '定位中英双语字幕']);
-    if (q.assPath) buttons.push(['openAss', '彩色字幕', '定位中英不同色 ASS 字幕']);
+    // 只保留「打开」与「重做」。
+    // 现在每个视频一个独立文件夹，音频/字幕/ASS/学习文档全在里面，
+    // 「打开」进去就能看到全部产物，再给每个文件单独做快捷按钮已无必要。
+    if (q.status === 'done' || q.status === 'skipped') {
+      buttons.push(['open', '打开', '打开该视频的文件夹（含视频/音频/字幕/文档）']);
+    }
     if (q.studyDocPath) {
-      buttons.push(['openDoc', '文档', '打开学习文档']);
-      buttons.push(['redoDoc', '重做', '重新生成（走翻译缓存；如需重新翻译请按住 Ctrl 点击）']);
+      buttons.push(['redoDoc', '重做', '重新生成（走翻译缓存，不产生 API 费用；按住 Ctrl 可强制重新翻译）']);
     } else if (q.subCount > 0) {
       buttons.push(['redoDoc', '生成文档', '调用大模型生成中英对照学习文档']);
     }
@@ -434,11 +434,6 @@ function renderQueue() {
         .join('');
     }
     el.setAttribute('data-path', q.filePath || '');
-    el.setAttribute('data-audio', q.audioPath || '');
-    el.setAttribute('data-subs', (q.subPaths && q.subPaths[0]) || '');
-    el.setAttribute('data-doc', q.studyDocPath || '');
-    el.setAttribute('data-bisrt', q.biSrtPath || '');
-    el.setAttribute('data-ass', q.assPath || '');
     el.setAttribute('data-key', q.key);
   }
 
@@ -793,36 +788,6 @@ function bind() {
       const p = el.getAttribute('data-path');
       if (p) api.shell.openPath(p);
       else toast('该任务还没有文件路径', 'warn');
-      return;
-    }
-    if (act === 'openAudio') {
-      const p = el.getAttribute('data-audio');
-      if (p) api.shell.showItem(p);
-      else toast('该任务还没有音频文件', 'warn');
-      return;
-    }
-    if (act === 'openSubs') {
-      const p = el.getAttribute('data-subs');
-      if (p) api.shell.showItem(p);
-      else toast('没有找到字幕文件', 'warn');
-      return;
-    }
-    if (act === 'openBiSrt') {
-      const p = el.getAttribute('data-bisrt');
-      if (p) api.shell.showItem(p);
-      else toast('还没有生成双语字幕', 'warn');
-      return;
-    }
-    if (act === 'openAss') {
-      const p = el.getAttribute('data-ass');
-      if (p) api.shell.showItem(p);
-      else toast('还没有生成 ASS 双语字幕', 'warn');
-      return;
-    }
-    if (act === 'openDoc') {
-      const p = el.getAttribute('data-doc');
-      if (p) api.shell.openPath(p);
-      else toast('还没有生成学习文档', 'warn');
       return;
     }
     if (act === 'redoDoc') {

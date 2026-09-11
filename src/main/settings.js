@@ -164,7 +164,10 @@ function load() {
   let disk = {};
   let migrated = false;
   try {
-    if (fs.existsSync(file)) disk = JSON.parse(fs.readFileSync(file, 'utf8')) || {};
+    if (fs.existsSync(file)) {
+      // 同样容忍 UTF-8 BOM（外部工具用 PowerShell 改过就会带上）
+      disk = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '')) || {};
+    }
   } catch (_) {
     disk = {};
   }

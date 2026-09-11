@@ -146,8 +146,10 @@ class DownloadQueue extends EventEmitter {
     try {
       const file = paths.queueFile();
       if (!fs.existsSync(file)) return;
-      const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-      const list = Array.isArray(raw) ? raw : raw.items || [];
+      // 容忍 UTF-8 BOM：用 PowerShell 的 Set-Content/ConvertTo-Json 动过这个文件就会带上 BOM，
+      // 而 JSON.parse 遇到 BOM 会直接抛错，整个下载队列就"凭空消失"了（实测踩过）。
+      const raw = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+      const list = Array.isArray(raw) ? raw : raw.items || (raw.key ? [raw] : []);
       for (const it of list) {
         if (!it || !it.key) continue;
         const item = Object.assign({}, it);
