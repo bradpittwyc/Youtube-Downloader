@@ -14,7 +14,7 @@ const sub = require('./subtitle');
 const assMod = require('./ass');
 const llm = require('./llm');
 const secret = require('./secret');
-const { runStudyPipeline, estimateTokens, summarize } = require('./pipeline');
+const { runStudyPipeline, runSummaryOnly, estimateTokens, summarize } = require('./pipeline');
 const { buildStudyDocx } = require('./word');
 
 /**
@@ -120,17 +120,42 @@ function cacheKey(videoId, srtPath) {
   return path.join(cacheDir(), `${h}.json`);
 }
 
-function readCache(videoId, srtPath, model) {
+function readCache(videoId, srtPath, model, opts) {
   try {
     const f = cacheKey(videoId, srtPath);
     if (!fs.existsSync(f)) return null;
     const j = JSON.parse(fs.readFileSync(f, 'utf8'));
-    if (j.model !== model || j.promptVersion !== llm.PROMPT_VERSION) return null;
+    if (j.model !== model) return null;
+    // allowStale：提示词升级后仍允许取回旧翻译（只补跑结构分析，不重译全文）
+    if (j.promptVersion !== llm.PROMPT_VERSION && !(opts && opts.allowStale)) return null;
+    // summaryDone：确认这份缓存里已经包含 Takeaways / 金句。
+    // 没有这个标记的（早期版本写的，或补总结时失败留下的）一律当作不完整，
+    // 走「复用翻译 + 只补总结」的轻量路径，而不是直接拿来用导致文档缺内容。
+    if (j.summaryDone !== true && !(opts && opts.allowStale)) return null;
     if (!j.segments || !j.segments.length) return null;
     return j;
   } catch (_) {
     return null;
   }
+}
+
+/** 统一构造缓存内容，避免两处写入字段不一致 */
+function cachePayload(cfg, res) {
+  return {
+    ts: Date.now(),
+    model: cfg.model,
+    promptVersion: llm.PROMPT_VERSION,
+    segments: res.segments,
+    vocab: res.vocab,
+    cueZh: res.cueZh,
+    takeaways: res.takeaways || [],
+    quotes: res.quotes || [],
+    /** 标记：这份缓存已经包含 Takeaways / 金句，可以放心直接用 */
+    summaryDone: true,
+    cues: (res.cues || []).map((c) => ({ start: c.start, end: c.end, text: c.text })),
+    stats: res.stats,
+    usage: res.usage,
+  };
 }
 
 function writeCache(videoId, srtPath, payload) {
@@ -165,6 +190,7 @@ async function generateForVideo(o) {
 
   let res = null;
   let fromCache = false;
+  let staleDoc = null; // 旧版本缓存的全文翻译（缺 takeaways / quotes），可复用
 
   if (!o.force) {
     const cached = readCache(o.videoId, o.srtPath, cfg.model);
@@ -172,7 +198,33 @@ async function generateForVideo(o) {
       res = cached;
       fromCache = true;
       onProgress({ phase: 'cache', done: 0, total: 1, label: '命中翻译缓存，不再调用大模型' });
+    } else {
+      // 提示词升级后（例如新增了 Takeaways / 金句）旧缓存会失效。
+      // 但逐段翻译很贵，而缺的只是「结构分析」那一次调用的产物，
+      // 所以这里把旧翻译捡回来，只补跑结构分析，不重译全文。
+      const loose = readCache(o.videoId, o.srtPath, cfg.model, { allowStale: true });
+      if (loose && (loose.segments || []).length) staleDoc = loose;
     }
+  }
+
+  if (!res && staleDoc) {
+    if (!isConfigured(cfg)) {
+      throw new Error('尚未配置大模型 API（请在设置里填写 Base URL、API Key 与模型名）');
+    }
+    onProgress({ phase: 'summary', done: 0, total: 1, label: '复用已有翻译，补生成 Takeaways 与金句' });
+    const sum = await runSummaryOnly({ srtPath: o.srtPath, cfg, cues: staleDoc.cues });
+    res = Object.assign({}, staleDoc, {
+      takeaways: sum.takeaways || [],
+      quotes: sum.quotes || [],
+      usage: Object.assign({}, staleDoc.usage || {}, {
+        prompt: ((staleDoc.usage || {}).prompt || 0) + (sum.usage.prompt || 0),
+        completion: ((staleDoc.usage || {}).completion || 0) + (sum.usage.completion || 0),
+        calls: ((staleDoc.usage || {}).calls || 0) + (sum.usage.calls || 0),
+        summaryOnly: true,
+      }),
+    });
+    fromCache = true;
+    writeCache(o.videoId, o.srtPath, cachePayload(cfg, res));
   }
 
   if (!res) {
@@ -186,17 +238,7 @@ async function generateForVideo(o) {
       concurrency: Number(settings.studyConcurrency) || 3,
       maxSegCues: Number(settings.studyMaxSegCues) || 45,
     });
-    writeCache(o.videoId, o.srtPath, {
-      ts: Date.now(),
-      model: cfg.model,
-      promptVersion: llm.PROMPT_VERSION,
-      segments: res.segments,
-      vocab: res.vocab,
-      cueZh: res.cueZh,
-      cues: res.cues.map((c) => ({ start: c.start, end: c.end, text: c.text })),
-      stats: res.stats,
-      usage: res.usage,
-    });
+    writeCache(o.videoId, o.srtPath, cachePayload(cfg, res));
   }
 
   const paths = derivePaths(o.videoPath, o.srtPath);
@@ -264,6 +306,8 @@ async function generateForVideo(o) {
       meta: Object.assign({}, o.meta, { model: cfg.model }),
       segments: res.segments,
       vocab: res.vocab || [],
+      takeaways: res.takeaways || [],
+      quotes: res.quotes || [],
       options: {
         includePureEnglish: settings.studyIncludePureEnglish !== false,
         includeVocabTable: settings.studyIncludeVocab !== false,

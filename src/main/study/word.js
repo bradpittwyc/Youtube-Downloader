@@ -120,6 +120,21 @@ async function buildStudyDocx(input) {
     children.push(new Paragraph({ style: 'MetaLine', children: runs(b, FONT_UI, { size: 18, color: GRAY }) }));
   }
 
+  // ---------- Takeaways：全文要点（紧跟在频道/时长/上传/链接下面）----------
+  const takeaways = input.takeaways || [];
+  if (takeaways.length) {
+    children.push(
+      new Paragraph({
+        style: 'SegHeading',
+        children: [new TextRun({ text: 'Takeaways', font: FONT_UI, size: 26, bold: true, color: ACCENT })],
+      })
+    );
+    takeaways.forEach((t, i) => {
+      if (t.en) children.push(new Paragraph({ style: 'BodyEN', children: runs(`${i + 1}. ${t.en}`, FONT) }));
+      if (t.zh) children.push(new Paragraph({ style: 'BodyZH', children: runs(`　　 ${t.zh}`, FONT) }));
+    });
+  }
+
   // ---------- 正文：逐段中英对照 ----------
   for (const seg of segments) {
     const head = [
@@ -229,6 +244,48 @@ async function buildStudyDocx(input) {
         rows: [header].concat(rows),
       })
     );
+  }
+
+  // ---------- 金句总结：放在整份文档的最末尾 ----------
+  const quotes = input.quotes || [];
+  if (quotes.length) {
+    children.push(
+      new Paragraph({
+        style: 'AppTitle',
+        pageBreakBefore: true,
+        children: [new TextRun({ text: '金句总结', font: FONT_UI, size: 28, bold: true })],
+      })
+    );
+    children.push(
+      new Paragraph({
+        style: 'MetaLine',
+        children: runs(`共 ${quotes.length} 句，由大模型从全片中挑出；方括号内是原片时间码`, FONT_UI, {
+          size: 18,
+          color: GRAY,
+        }),
+      })
+    );
+    for (const q of quotes) {
+      if (q.en) {
+        children.push(
+          new Paragraph({
+            style: 'NoteQ',
+            children: runs(`◆ ${q.en}`, FONT, { size: 22, italics: true, color: '2E4053' }),
+          })
+        );
+      }
+      if (q.zh) {
+        children.push(new Paragraph({ style: 'NoteA', children: runs(`　 ${q.zh}`, FONT, { size: 20, color: '34495E' }) }));
+      }
+      if (q.timeText) {
+        children.push(
+          new Paragraph({
+            style: 'MetaLine',
+            children: runs(`　 [${q.timeText}]`, FONT_UI, { size: 16, color: GRAY }),
+          })
+        );
+      }
+    }
   }
 
   const doc = new Document({

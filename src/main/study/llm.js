@@ -11,7 +11,8 @@ const DEFAULT_TIMEOUT_MS = 300000;
  * 提示词版本号。改动提示词时递增，用于让旧的翻译缓存自动失效
  * （否则会拿旧提示词产出的结果去生成新文档，很难排查）。
  */
-const PROMPT_VERSION = 3;
+// 4：结构分析同时返回 takeaways（全文要点）与 quotes（金句）
+const PROMPT_VERSION = 4;
 
 function joinUrl(baseURL, suffix) {
   return String(baseURL).replace(/\/+$/, '') + suffix;
@@ -121,7 +122,7 @@ const STRUCT_SYSTEM = `你是专业的字幕结构化编辑。用户会给你一
 
 这些文本是从自动字幕切分出来的碎片，缺少标点、大小写和完整句子结构。你只做结构分析，不要翻译、不要改写。
 
-任务：把整篇内容按语义和主题划分成若干段落，每段在内容上自成一体。
+任务一 · 分段：把整篇内容按语义和主题划分成若干段落，每段在内容上自成一体。
 
 硬性要求：
 1. 段落边界必须落在给定的序号边界上；
@@ -130,8 +131,19 @@ const STRUCT_SYSTEM = `你是专业的字幕结构化编辑。用户会给你一
 4. 段落数量按内容自然划分，通常 6~25 段；
 5. 每段给一个简短的中文主题小标题，不超过 15 个字。
 
-只输出 JSON 数组，不要任何解释、不要 Markdown 代码块。格式：
-[{"from":1,"to":45,"topic":"开场与本期主题"}]`;
+任务二 · takeaways（全文要点）：用 3~5 条总结整个视频的核心内容。
+每条一句话，既要英文 "en"，也要对应的简体中文 "zh"。
+要抓真正的主干观点，不要写「本视频介绍了…」这种空话。
+
+任务三 · quotes（金句）：摘取视频中最精彩的 3~6 句话——
+有洞察力、有冲击力、值得记住、适合背诵的那种。每条给出：
+  "cue"：该句在输入中的起始序号（整数，必须在 1 到总条数之间）
+  "en"：英文原句（从原文原样摘取，可修正明显的语音识别错误）
+  "zh"：中文翻译
+
+【输出格式】只输出一个 JSON 对象，不要任何解释、不要 Markdown 代码块。
+注意：顶层必须是对象（以 { 开头），不是数组。
+{"plan":[{"from":1,"to":45,"topic":"开场与本期主题"}],"takeaways":[{"en":"...","zh":"..."}],"quotes":[{"cue":12,"en":"...","zh":"..."}]}`;
 
 const TRANSLATE_SYSTEM = `你是资深英中翻译与英语教学编辑。用户会给你一段 YouTube 视频的自动字幕碎片（带序号），以及上一段的结尾作为上下文。
 
@@ -167,6 +179,45 @@ const TRANSLATE_SYSTEM = `你是资深英中翻译与英语教学编辑。用户
 只输出 JSON 对象，不要任何解释、不要 Markdown 代码块。`;
 
 // ---------------------------------------------------------------- 校验
+
+/**
+ * 把结构分析的返回拆成三段。
+ * 兼容两种形态：老版本只回一个数组；新版本回 { plan, takeaways, quotes }。
+ */
+function extractStruct(parsed) {
+  if (Array.isArray(parsed)) return { plan: parsed, takeaways: [], quotes: [] };
+  if (!parsed || typeof parsed !== 'object') return { plan: null, takeaways: [], quotes: [] };
+  return {
+    plan: Array.isArray(parsed.plan) ? parsed.plan : Array.isArray(parsed.segments) ? parsed.segments : null,
+    takeaways: normTakeaways(parsed.takeaways),
+    quotes: normQuotes(parsed.quotes),
+  };
+}
+
+/** 全文要点：最多 5 条，中英都要有 */
+function normTakeaways(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((x) => ({
+      en: String((x && x.en) || '').trim(),
+      zh: String((x && x.zh) || '').trim(),
+    }))
+    .filter((x) => x.en || x.zh)
+    .slice(0, 5);
+}
+
+/** 金句：最多 6 条，cue 用来换算时间码 */
+function normQuotes(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((x) => ({
+      cue: Number(x && x.cue) || 0,
+      en: String((x && x.en) || '').trim(),
+      zh: String((x && x.zh) || '').trim(),
+    }))
+    .filter((x) => x.en || x.zh)
+    .slice(0, 6);
+}
 
 function validatePlan(plan, total) {
   const errs = [];
@@ -217,6 +268,9 @@ module.exports = {
   STRUCT_SYSTEM,
   TRANSLATE_SYSTEM,
   validatePlan,
+  extractStruct,
+  normTakeaways,
+  normQuotes,
   validateCues,
   parseCuesField,
   PROMPT_VERSION,

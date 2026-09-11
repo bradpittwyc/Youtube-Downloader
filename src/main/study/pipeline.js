@@ -44,8 +44,7 @@ function snapPlanToSentences(plan, cues) {
   return { plan: adj, moved };
 }
 
-/** 主动把过大的段拆小（在句末处切），避免模型漏条目导致昂贵的重发 */
-function splitOversizedSegments(plan, cues, maxCues) {
+/** 主动把过大的段拆小（在句末处切），避免模型漏条目导致昂贵的重发 */function splitOversizedSegments(plan, cues, maxCues) {
   if (!maxCues || maxCues < 8) return { plan, splitCount: 0 };
   const out = [];
   let splitCount = 0;
@@ -311,6 +310,8 @@ async function runStudyPipeline(o) {
     cueZh,
     cues: work,
     vocab: vocabAgg,
+    takeaways,
+    quotes: resolveQuoteTimes(quotes, work),
     failed,
     stats: Object.assign({}, loaded.stats, {
       usedCues: work.length,
@@ -337,8 +338,68 @@ function summarize(res, cfg) {
   ].join(' · ');
 }
 
+/** 毫秒 → h:mm:ss（金句旁边标时间码，方便回看原片） */
+function fmtClock(ms) {
+  const total = Math.max(0, Math.round((ms || 0) / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return h > 0
+    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+    : `${m}:${String(s).padStart(2, '0')}`;
+}
+
+/** 把金句的 cue 序号换算成时间码 */
+function resolveQuoteTimes(quotes, cues) {
+  return (quotes || []).map((q) => {
+    const n = Math.max(1, Math.min(cues.length, Number(q.cue) || 1));
+    const c = cues[n - 1] || {};
+    return { en: q.en, zh: q.zh, startMs: c.start || 0, timeText: fmtClock(c.start || 0) };
+  });
+}
+
+/**
+ * 只跑「结构分析」这一遍，拿 takeaways / quotes。
+ *
+ * 用途：给【已经缓存过全文翻译】的旧文档补上总结。
+ * 结构分析是一次调用，而逐段翻译是几十次调用——这样补总结只花一次调用的钱，
+ * 不必为了让新字段生效就把整篇重译一遍。
+ */
+async function runSummaryOnly(o) {
+  const cfg = o.cfg;
+  const work = o.cues && o.cues.length ? o.cues : sub.loadCues(o.srtPath).cues;
+  const usage = { prompt: 0, completion: 0, calls: 0, repairs: 0, splits: 0 };
+  if (!work.length) return { takeaways: [], quotes: [], usage };
+  const structLines = sub.buildStructureLines(work);
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const r = await llm.callLLM(
+      cfg,
+      [
+        { role: 'system', content: llm.STRUCT_SYSTEM },
+        { role: 'user', content: structLines.join('\n') },
+      ],
+      4096
+    );
+    usage.prompt += r.usage.prompt_tokens || 0;
+    usage.completion += r.usage.completion_tokens || 0;
+    usage.calls++;
+    try {
+      const st = llm.extractStruct(llm.parseJsonLoose(r.content));
+      if (st.takeaways.length || st.quotes.length) {
+        return { takeaways: st.takeaways, quotes: resolveQuoteTimes(st.quotes, work), usage };
+      }
+    } catch (_) {
+      /* 重试 */
+    }
+  }
+  return { takeaways: [], quotes: [], usage };
+}
+
 module.exports = {
   runStudyPipeline,
+  runSummaryOnly,
+  resolveQuoteTimes,
+  fmtClock,
   snapPlanToSentences,
   splitOversizedSegments,
   estimateTokens,
