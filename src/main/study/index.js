@@ -15,8 +15,28 @@ const secret = require('./secret');
 const { runStudyPipeline, estimateTokens, summarize } = require('./pipeline');
 const { buildStudyDocx } = require('./word');
 
-/** 从视频路径推导产物路径 */
-function derivePaths(videoPath, srtPath) {
+/**
+ * 写文件，并把人话讲清楚被占用的错误。
+ * 最常见的场景：用户正开着这份 Word 文档或播放器占着字幕，此时 Windows 会返回 EBUSY。
+ */
+function writeFileSafe(p, data) {
+  try {
+    fs.writeFileSync(p, data);
+  } catch (err) {
+    const code = err && err.code;
+    if (code === 'EBUSY' || code === 'EPERM' || code === 'EACCES') {
+      throw new Error(
+        `文件被占用，写不进去：${path.basename(p)}。如果它正在 Word 或播放器里打开，请先关闭再重试。`
+      );
+    }
+    if (code === 'ENOSPC') {
+      throw new Error(`磁盘空间不足，无法写入：${path.basename(p)}`);
+    }
+    throw err;
+  }
+}
+
+/** 从视频路径推导产物路径 */function derivePaths(videoPath, srtPath) {
   const base = videoPath ? videoPath.replace(/\.[^.\\/]+$/, '') : String(srtPath).replace(/\.en\.srt$/i, '');
   return {
     bilingualSrt: `${base}.zh-en.srt`,
@@ -158,7 +178,7 @@ async function generateForVideo(o) {
     onProgress({ phase: 'write', done: 0, total: 2, label: '生成双语字幕' });
     const srtText = sub.buildBilingualSrt(res.cues, res.cueZh);
     if (srtText.trim()) {
-      fs.writeFileSync(paths.bilingualSrt, srtText, 'utf8');
+      writeFileSafe(paths.bilingualSrt, srtText);
       wrote.bilingualSrt = paths.bilingualSrt;
     }
   }
@@ -176,9 +196,8 @@ async function generateForVideo(o) {
         segmentTimecode: settings.studyTimecode !== false,
       },
     });
-    fs.writeFileSync(paths.docx, buf);
-    wrote.docx = paths.docx;
-  }
+    writeFileSafe(paths.docx, buf);
+    wrote.docx = paths.docx;  }
 
   return {
     paths: wrote,
@@ -206,4 +225,5 @@ module.exports = {
   llmConfigFrom,
   isConfigured,
   clearCache,
+  writeFileSafe,
 };

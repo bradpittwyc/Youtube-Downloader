@@ -667,6 +667,21 @@ function bind() {
     });
     updateSelectionUI();
   });
+  // 与「仅选未下载」的区别：不清空已有选择，而是在其基础上追加未下载的
+  $('btnSelectAddUnselected').addEventListener('click', () => {
+    const done = new Set(
+      state.queue.filter((q) => q.status === 'done' || q.status === 'skipped').map((q) => q.key)
+    );
+    let added = 0;
+    visible().forEach((it) => {
+      if (!done.has(it.id) && !state.selected.has(it.id)) {
+        state.selected.add(it.id);
+        added++;
+      }
+    });
+    updateSelectionUI();
+    toast(added ? `已追加 ${added} 个未下载的视频` : '没有新的未下载视频可追加', added ? 'ok' : 'warn');
+  });
 
   $('btnDownload').addEventListener('click', () => {
     const items = Array.from(state.selected)
@@ -841,6 +856,7 @@ function bind() {
     await api.settings.set(patch);
     await loadSettingsToForm();
     toast('设置已保存', 'ok');
+    $('settingsModal').classList.add('hidden');
   });
 
   $('btnUpdateKernel').addEventListener('click', async () => {

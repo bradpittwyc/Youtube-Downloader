@@ -110,7 +110,6 @@ async function buildStudyDocx(input) {
   if (meta.uploadDate) metaBits.push(`上传：${meta.uploadDate}`);
   if (meta.url) metaBits.push(`链接：${meta.url}`);
   metaBits.push(`生成：${new Date().toLocaleString('zh-CN', { hour12: false })}`);
-  if (meta.model) metaBits.push(`翻译模型：${meta.model}`);
   for (const b of metaBits) {
     children.push(new Paragraph({ style: 'MetaLine', children: runs(b, FONT_UI, { size: 18, color: GRAY }) }));
   }
