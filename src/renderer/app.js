@@ -11,13 +11,14 @@
 (function () {
 const api = window.api;
 
-const SECTION_ORDER = ['single', 'videos', 'shorts', 'live', 'podcasts', 'playlist'];
+const SECTION_ORDER = ['single', 'videos', 'shorts', 'live', 'podcasts', 'playlists', 'playlist'];
 const SECTION_LABEL = {
   single: '单个视频',
   videos: 'Videos',
   shorts: 'Shorts',
   live: 'Live 直播',
   podcasts: 'Podcasts',
+  playlists: '播放列表',
   playlist: '播放列表',
 };
 const LIVE_GROUP = {
@@ -36,6 +37,10 @@ const state = {
   searchScope: 'current',
   /** 只显示还没下载过的视频（显示过滤器，只影响列表可见性，不影响勾选） */
   showOnlyUndownloaded: false,
+  /** 播放列表按需展开：plId → 该列表的视频数组 */
+  playlistVideos: {},
+  /** 正在读取中的播放列表 id */
+  playlistLoading: new Set(),
   selected: new Set(),
   renderedCount: 0,
   queue: [],
@@ -148,6 +153,18 @@ function filteredItems() {
   return out;
 }
 
+/** 播放列表标签页里已展开的全部视频 */
+function expandedPlaylistItems() {
+  const out = [];
+  for (const vids of Object.values(state.playlistVideos)) out.push(...vids);
+  return out;
+}
+
+/** 当前列表里可见的条目（播放列表标签页走单独一套） */
+function currentVisibleItems() {
+  return state.activeTab === 'playlists' ? expandedPlaylistItems() : filteredItems();
+}
+
 function tabsToShow() {
   const sections = (state.data && state.data.sections) || {};
   const list = [{ key: 'all', label: '全部', count: allItems().length, missing: false }];
@@ -193,7 +210,7 @@ function rendersWarnings() {
     .join('');
 }
 
-function rowHtml(it) {
+function rowHtml(it, nested) {
   const selected = state.selected.has(it.id);
   const badges = [];
   if (it.liveStatus === 'is_live') badges.push('<span class="badge live">直播中</span>');
@@ -210,7 +227,7 @@ function rowHtml(it) {
   const doneInQueue = state.queue.find((q) => q.key === it.id && (q.status === 'done' || q.status === 'skipped'));
   if (doneInQueue) meta.push('<span class="badge done">已下载</span>');
 
-  return `<div class="row ${selected ? 'selected' : ''}" data-id="${esc(it.id)}">
+  return `<div class="row ${selected ? 'selected' : ''} ${nested ? 'nested' : ''}" data-id="${esc(it.id)}">
     <input type="checkbox" ${selected ? 'checked' : ''} data-check="${esc(it.id)}" />
     <img class="row-thumb" loading="lazy" src="${esc(it.thumbnail || '')}" />
     <div class="row-main">
@@ -224,6 +241,9 @@ function rowHtml(it) {
 }
 
 function renderList(reset) {
+  // 播放列表标签页走单独一套渲染：先列播放列表，点开某个才显示它的视频
+  if (state.activeTab === 'playlists') return renderPlaylistsList(reset);
+
   const list = $('list');
   const items = filteredItems();
   if (reset) {
@@ -264,8 +284,115 @@ function renderList(reset) {
   updateSelectionUI();
 }
 
+/**
+ * 播放列表标签页的渲染。
+ * 像 YouTube 原页面一样先把播放列表列出来（缩略图 + 标题），
+ * **点了某个播放列表才去抓它的视频**——不预展开，识别才快。
+ */
+function renderPlaylistsList(reset) {
+  const list = $('list');
+  if (reset) {
+    state.renderedCount = 0;
+    list.innerHTML = '';
+  }
+  const pls = (state.data && state.data.playlists) || [];
+  if (!pls.length) {
+    list.innerHTML = '<div class="group-head">该频道没有播放列表</div>';
+    $('listMore').classList.add('hidden');
+    return;
+  }
+
+  let html = '';
+  for (const pl of pls) {
+    const loading = state.playlistLoading.has(pl.id);
+    const vids = state.playlistVideos[pl.id];
+    const open = !!vids;
+    const selCount = open ? vids.filter((v) => state.selected.has(v.id)).length : 0;
+    const allSel = open && vids.length > 0 && selCount === vids.length;
+    const meta = loading
+      ? '<span class="spinner"></span> 正在读取…'
+      : open
+      ? `${vids.length} 个视频${selCount ? ` · 已选 ${selCount}` : ''}`
+      : '点击展开查看视频';
+    html += `<div class="pl-row ${open ? 'open' : ''}" data-pl-row="${esc(pl.id)}">
+      <input type="checkbox" data-pl-check="${esc(pl.id)}" ${allSel ? 'checked' : ''} title="勾选 = 把这个播放列表全部加入选择" />
+      <img class="pl-thumb" loading="lazy" src="${esc(pl.thumbnail || '')}" />
+      <div class="pl-main">
+        <div class="pl-title">${esc(pl.title)}</div>
+        <div class="pl-meta">${meta}</div>
+      </div>
+      <div class="pl-actions">
+        <button class="btn tiny" data-pl-toggle="${esc(pl.id)}">${loading ? '读取中…' : open ? '收起' : '展开'}</button>
+      </div>
+    </div>`;
+    if (open) html += vids.map((v) => rowHtml(v, true)).join('');
+  }
+  list.innerHTML = html;
+  $('listMore').classList.add('hidden');
+  updateSelectionUI();
+}
+
+/** 展开 / 收起某个播放列表 */
+async function togglePlaylist(id) {
+  const pl = ((state.data && state.data.playlists) || []).find((p) => p.id === id);
+  if (!pl) return;
+  if (state.playlistVideos[id]) {
+    delete state.playlistVideos[id];
+    renderList(true);
+    return;
+  }
+  await expandPlaylist(pl);
+}
+
+/** 真正去抓某个播放列表的视频；已抓过则直接复用 */
+async function expandPlaylist(pl) {
+  if (state.playlistVideos[pl.id]) return state.playlistVideos[pl.id];
+  if (state.playlistLoading.has(pl.id)) return null;
+  state.playlistLoading.add(pl.id);
+  renderList(true);
+
+  const res = await api.channel.playlistItems({ url: pl.url, title: pl.title });
+  state.playlistLoading.delete(pl.id);
+
+  if (!res.ok) {
+    toast(`展开「${pl.title}」失败：${res.error}`, 'err', 9000);
+    renderList(true);
+    return null;
+  }
+
+  // 合并进总列表：已在总列表里的复用【同一个对象】，
+  // 这样同一视频在播放列表里和在 Videos 里的勾选状态永远一致。
+  const byId = new Map(state.data.items.map((i) => [i.id, i]));
+  const merged = res.items.map((it) => {
+    const exist = byId.get(it.id);
+    if (exist) {
+      if (!exist.playlistTitle && it.playlistTitle) exist.playlistTitle = it.playlistTitle;
+      return exist;
+    }
+    byId.set(it.id, it);
+    state.data.items.push(it);
+    return it;
+  });
+  state.playlistVideos[pl.id] = merged;
+  renderList(true);
+  return merged;
+}
+
+/** 勾选整个播放列表 = 展开并全选 */
+async function onPlaylistCheck(id, checked) {
+  const pl = ((state.data && state.data.playlists) || []).find((p) => p.id === id);
+  if (!pl) return;
+  const vids = state.playlistVideos[id] || (await expandPlaylist(pl));
+  if (!vids) return;
+  if (checked) vids.forEach((v) => state.selected.add(v.id));
+  else vids.forEach((v) => state.selected.delete(v.id));
+  renderList(true);
+  updateSelectionUI();
+  toast(checked ? `已把「${pl.title}」的 ${vids.length} 个视频加入选择` : `已取消「${pl.title}」的选择`, 'ok', 3000);
+}
+
 function updateSelectionUI() {
-  const items = filteredItems();
+  const items = currentVisibleItems();
   $('selCounter').textContent = `已选 ${state.selected.size} / ${items.length}`;
   const n = state.selected.size;
   $('actionSummary').textContent = n ? `已选择 ${n} 个视频` : '未选择任何视频';
@@ -304,6 +431,9 @@ function renderChannel(data) {
   state.activeTab = 'all';
   state.selected.clear();
   state.renderedCount = 0;
+  // 换频道时清空播放列表的展开状态
+  state.playlistVideos = {};
+  state.playlistLoading.clear();
 
   $('emptyState').classList.add('hidden');
   $('channelView').classList.remove('hidden');
@@ -512,10 +642,10 @@ function onProgress(p) {
   el.classList.remove('hidden');
   if (p.phase === 'tab') {
     el.innerHTML = `<span class="spinner"></span> 正在抓取 ${esc(SECTION_LABEL[p.tab] || p.tab)} 标签页（${p.index + 1}/${p.total}）…`;
-  } else if (p.phase === 'podcast-playlist') {
-    el.innerHTML = `<span class="spinner"></span> 正在展开播客播放列表「${esc(p.label || '')}」（${(p.index || 0) + 1}/${
-      p.total || '?'
-    }）…`;
+  } else if (p.phase === 'expand-playlist') {
+    el.innerHTML = `<span class="spinner"></span> 正在展开${esc(SECTION_LABEL[p.tab] || '')}容器「${esc(
+      p.label || ''
+    )}」（${(p.index || 0) + 1}/${p.total || '?'}）…`;
   } else if (p.phase === 'probe') {
     el.innerHTML = `<span class="spinner"></span> ${esc(p.label || '读取中…')}`;
   } else if (p.phase === 'cache') {
@@ -541,6 +671,7 @@ async function loadSettingsToForm() {
   $('setAutoRetry').value = s.autoRetry == null ? 3 : s.autoRetry;
   $('setFilename').value = s.filenameTemplate || '';
   $('setOrganizeInFolder').checked = s.organizeInFolder !== false;
+  $('setReadPlaylists').checked = s.readPlaylists !== false;
   $('setRateLimit').value = s.rateLimit || '';
   $('setProxy').value = s.proxy || '';
   $('setCookieFile').value = s.cookieFile || '';
@@ -640,6 +771,23 @@ function bind() {
   });
 
   $('list').addEventListener('click', (e) => {
+    // 播放列表行的处理要放在最前面：展开/收起、整列表勾选
+    const plToggle = e.target.closest('[data-pl-toggle]');
+    if (plToggle) {
+      togglePlaylist(plToggle.getAttribute('data-pl-toggle'));
+      return;
+    }
+    const plCheck = e.target.closest('[data-pl-check]');
+    if (plCheck) {
+      onPlaylistCheck(plCheck.getAttribute('data-pl-check'), plCheck.checked);
+      return;
+    }
+    const plRow = e.target.closest('[data-pl-row]');
+    if (plRow) {
+      togglePlaylist(plRow.getAttribute('data-pl-row'));
+      return;
+    }
+
     const dl = e.target.closest('[data-dl]');
     if (dl) {
       const id = dl.getAttribute('data-dl');
@@ -682,7 +830,7 @@ function bind() {
     renderList(true);
   });
 
-  const visible = () => filteredItems();
+  const visible = () => currentVisibleItems();
   $('btnSelectAll').addEventListener('click', () => {
     visible().forEach((it) => state.selected.add(it.id));
     updateSelectionUI();
@@ -839,6 +987,7 @@ function bind() {
       autoRetry: Number($('setAutoRetry').value) || 0,
       filenameTemplate: $('setFilename').value.trim() || '%(title)s [%(id)s].%(ext)s',
       organizeInFolder: $('setOrganizeInFolder').checked,
+      readPlaylists: $('setReadPlaylists').checked,
       rateLimit: $('setRateLimit').value.trim(),
       proxy: $('setProxy').value.trim(),
       cookieFile: $('setCookieFile').value.trim(),

@@ -384,6 +384,7 @@ function registerIpc() {
 
       const out = await enumerator(bin, baseUrl, {
         maxItems: Number(settings.maxItemsPerChannel) || 0,
+        readPlaylists: settings.readPlaylists !== false,
         onProgress: (p) => send(p),
         onChild: (c) => {
           if (activeEnumerate && activeEnumerate.canceled) {
@@ -407,6 +408,19 @@ function registerIpc() {
       return { ok: false, error: err.message };
     } finally {
       activeEnumerate = null;
+    }
+  });
+
+  ipcMain.handle('channel:playlist-items', async (_e, { url, title }) => {
+    const bin = paths.ytDlpPath(settingsStore.load());
+    if (!bin) return { ok: false, error: '未找到 yt-dlp.exe' };
+    if (!url) return { ok: false, error: '缺少播放列表地址' };
+    try {
+      const res = await channel.playlistItems(bin, url, title || '');
+      if (!res.ok) return { ok: false, error: res.error };
+      return { ok: true, items: res.items, title: res.title };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err).slice(0, 300) };
     }
   });
 

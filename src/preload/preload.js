@@ -34,6 +34,7 @@ contextBridge.exposeInMainWorld('api', {
     enumerate: (input, force) => ipcRenderer.invoke('channel:enumerate', { input, force }),
     cancel: () => ipcRenderer.invoke('channel:cancel'),
     clearCache: (input) => ipcRenderer.invoke('channel:clear-cache', input),
+    playlistItems: (payload) => ipcRenderer.invoke('channel:playlist-items', payload),
     onProgress: (cb) => on('channel:progress', cb),
   },
 

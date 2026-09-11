@@ -14,20 +14,27 @@
  */
 const { BASE_FLAGS, run, killTree, extractErrors } = require('./ytdlp');
 
-const TABS = ['videos', 'shorts', 'streams', 'podcasts'];
+const TABS = ['videos', 'shorts', 'streams', 'podcasts', 'playlists'];
 
 /**
  * 标签页 → 分类键 的映射。
  * streams 标签页的内容归入 live 分类，因此 tabStatus / warnings 也必须用 live 作为键，
  * 否则渲染层按 live 查不到状态（踩坑：会导致「没有直播标签的频道」整个 Live 分类消失）。
  */
-const SECTION_OF_TAB = { videos: 'videos', shorts: 'shorts', streams: 'live', podcasts: 'podcasts' };
+const SECTION_OF_TAB = {
+  videos: 'videos',
+  shorts: 'shorts',
+  streams: 'live',
+  podcasts: 'podcasts',
+  playlists: 'playlists',
+};
 
 const TAB_LABEL = {
   videos: 'Videos',
   shorts: 'Shorts',
   live: 'Live',
   podcasts: 'Podcasts',
+  playlists: '播放列表',
   playlist: '播放列表',
 };
 
@@ -201,7 +208,9 @@ async function enumerateChannel(bin, channelBase, opts = {}) {
 
   const result = {
     channel: { url: channelBase, title: '', id: '', handle: '', followerCount: null, avatar: '' },
-    sections: { videos: [], shorts: [], live: [], podcasts: [] },
+    sections: { videos: [], shorts: [], live: [], podcasts: [], playlists: [] },
+    /** 播放列表标签页列出的播放列表本身（不展开，等用户点开再抓视频） */
+    playlists: [],
     items: [],
     warnings: [],
     tabStatus: {},
@@ -209,10 +218,14 @@ async function enumerateChannel(bin, channelBase, opts = {}) {
 
   const byId = new Map();
 
-  for (let i = 0; i < TABS.length; i++) {
-    const tab = TABS[i];
+  // 播放列表标签页要二级展开每个播放列表，请求量可能很大
+  //（实测 @OpenAI 有 58 个），因此允许按设置跳过。
+  const tabs = TABS.filter((t) => t !== 'playlists' || opts.readPlaylists !== false);
+
+  for (let i = 0; i < tabs.length; i++) {
+    const tab = tabs[i];
     const sec = SECTION_OF_TAB[tab];
-    if (onProgress) onProgress({ phase: 'tab', tab: sec, index: i, total: TABS.length });
+    if (onProgress) onProgress({ phase: 'tab', tab: sec, index: i, total: tabs.length });
 
     const tabUrl = `${channelBase}/${tab}`;
     const res = await dumpFlat(bin, tabUrl, { onChild: opts.onChild });
@@ -247,47 +260,44 @@ async function enumerateChannel(bin, channelBase, opts = {}) {
 
     const entries = Array.isArray(json.entries) ? json.entries.filter(Boolean) : [];
 
-    if (tab === 'podcasts') {
-      // 二级展开：podcasts 标签页里是播放列表容器
-      const containers = entries.filter((e) => e.ie_key === 'YoutubeTab' || /playlist\?list=/.test(e.url || ''));
-      const directVideos = entries.filter((e) => !(e.ie_key === 'YoutubeTab' || /playlist\?list=/.test(e.url || '')));
-      let done = 0;
-
-      for (const c of containers) {
-        if (onProgress) {
-          onProgress({
-            phase: 'podcast-playlist',
-            tab: sec,
-            index: done,
-            total: containers.length,
-            label: c.title || '',
-          });
-        }
-        const sub = await dumpFlat(bin, c.url, { onChild: opts.onChild });
-        done++;
-        if (!sub.ok) {
-          result.warnings.push({
-            tab: sec,
-            level: 'error',
-            message: `播客「${c.title || c.id}」展开失败：${sub.error}`,
-          });
-          continue;
-        }
-        const eps = Array.isArray(sub.json.entries) ? sub.json.entries.filter(Boolean) : [];
-        for (const ep of eps) {
-          if (!ep.id) continue;
-          pushItem(result, byId, normalizeEntry(ep, 'podcasts', { playlistTitle: c.title || '' }), maxItems);
-        }
-      }
-      for (const e of directVideos) {
-        if (!e.id) continue;
-        pushItem(result, byId, normalizeEntry(e, 'podcasts', {}), maxItems);
-      }
-    } else {
+    // 播放列表标签页【不预展开】——像原页面一样先把播放列表列出来（缩略图 + 标题），
+    // 用户点了某个播放列表再去抓它的视频。这样识别很快，也不会一次发几十个请求。
+    if (tab === 'playlists') {
       for (const e of entries) {
-        if (!e.id) continue;
-        pushItem(result, byId, normalizeEntry(e, sec, {}), maxItems);
+        if (!e.id || !e.url) continue;
+        const thumbs = Array.isArray(e.thumbnails) ? e.thumbnails : [];
+        result.playlists.push({
+          id: e.id,
+          title: e.title || '(无标题)',
+          url: e.url,
+          thumbnail: thumbs.length ? thumbs[thumbs.length - 1].url || '' : '',
+          videoCount: typeof e.playlist_count === 'number' ? e.playlist_count : null,
+        });
       }
+      result.sections.playlists = result.playlists;
+      continue;
+    }
+
+    // 有些标签页返回的不是视频，而是「播放列表容器」。
+    // podcasts 就是这种形态（条目是 ie_key=YoutubeTab、url 指向 playlist?list=...），
+    // 必须二级展开才能拿到单集。
+    const isContainer = (e) => e.ie_key === 'YoutubeTab' || /playlist\?list=/.test(String(e.url || ''));
+
+    for (const e of entries) {
+      if (!e.id || isContainer(e)) continue;
+      pushItem(result, byId, normalizeEntry(e, sec, {}), maxItems);
+    }
+
+    const containers = entries.filter((e) => isContainer(e) && e.url);
+    if (containers.length) {
+      await expandContainers(bin, containers, sec, {
+        result,
+        byId,
+        maxItems,
+        onProgress,
+        onChild: opts.onChild,
+        concurrency: Math.max(1, Number(opts.expandConcurrency) || 3),
+      });
     }
   }
 
@@ -295,19 +305,92 @@ async function enumerateChannel(bin, channelBase, opts = {}) {
   return { ok: true, result };
 }
 
+/**
+ * 二级展开播放列表容器（podcasts / playlists 标签页都返回这种形态）。
+ *
+ * 用有限并发（默认 3）：实测 @OpenAI 有 58 个播放列表，串行展开要一分多钟；
+ * 但并发太高又容易触发 YouTube「Sign in to confirm you're not a bot」的风控，取个折中。
+ * 识别结果有 30 分钟缓存，所以同样的频道重复识别不会再发这些请求。
+ */
+async function expandContainers(bin, containers, sec, ctx) {
+  const { result, byId, maxItems, onProgress, onChild, concurrency } = ctx;
+  const label = TAB_LABEL[sec] || sec;
+  let done = 0;
+  let cursor = 0;
+
+  async function worker() {
+    while (true) {
+      const idx = cursor++;
+      if (idx >= containers.length) return;
+      const c = containers[idx];
+      if (onProgress) {
+        onProgress({ phase: 'expand-playlist', tab: sec, index: done, total: containers.length, label: c.title || '' });
+      }
+      const sub = await dumpFlat(bin, c.url, { onChild });
+      done++;
+      if (!sub.ok) {
+        result.warnings.push({
+          tab: sec,
+          level: 'error',
+          message: `${label}「${c.title || c.id}」展开失败：${sub.error}`,
+        });
+      } else {
+        const items = Array.isArray(sub.json.entries) ? sub.json.entries.filter(Boolean) : [];
+        for (const it of items) {
+          if (!it.id) continue;
+          pushItem(result, byId, normalizeEntry(it, sec, { playlistTitle: c.title || '' }), maxItems);
+        }
+      }
+      if (onProgress) {
+        onProgress({ phase: 'expand-playlist', tab: sec, index: done, total: containers.length, label: c.title || '' });
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, containers.length) }, worker));
+}
+
 function pushItem(result, byId, item, maxItems) {
   if (maxItems > 0 && byId.size >= maxItems && !byId.has(item.id)) return;
   const existing = byId.get(item.id);
   if (existing) {
-    // 同一视频出现在多个标签页（例如同时属于 Videos 和 Podcasts）——合并分类，避免重复下载
+    // 同一视频出现在多个标签页（例如既在 Videos 里、又属于某个播放列表）——
+    // 合并分类即可，勾选是按视频 id 去重的，不会重复下载。
     for (const s of item.sections) {
-      if (!existing.sections.includes(s)) existing.sections.push(s);
+      if (!existing.sections.includes(s)) {
+        existing.sections.push(s);
+        // 关键：新加入的分类也要把它放进对应的分类数组。
+        // 界面用「分类数组的长度」决定这个标签页显不显示，
+        // 只改 item.sections 而不推数组，会导致「视频确实属于播放列表，
+        // 但 Playlists 标签页压根不出现」这种诡异现象（实测踩过）。
+        if (result.sections[s] && !result.sections[s].includes(existing)) {
+          result.sections[s].push(existing);
+        }
+      }
     }
     if (!existing.playlistTitle && item.playlistTitle) existing.playlistTitle = item.playlistTitle;
     return;
   }
   byId.set(item.id, item);
-  result.sections[item.sections[0]].push(item);
+  // 注意：要推进【每一个】所属分类的数组，而不只是第一个。
+  // 界面上的分类计数与本分类列表都依赖这些数组；只推第一个会导致
+  // 「Playlists 标签页显示 20 个、计数却是 0」这种对不上的情况。
+  for (const s of item.sections) {
+    if (result.sections[s]) result.sections[s].push(item);
+  }
+}
+
+/** 按需抓取某个播放列表里的视频（用户在界面上点开某个播放列表时才调用） */
+async function playlistItems(bin, url, playlistTitle, opts = {}) {
+  const res = await dumpFlat(bin, url, { onChild: opts.onChild });
+  if (!res.ok) return { ok: false, error: res.error };
+  const json = res.json;
+  const entries = Array.isArray(json.entries) ? json.entries.filter(Boolean) : [];
+  const title = json.title || playlistTitle || '';
+  const items = entries
+    .filter((e) => e.id && !(e.ie_key === 'YoutubeTab'))
+    .map((e) => normalizeEntry(e, 'playlists', { playlistTitle: title, playlistId: json.id || '' }));
+  return { ok: true, items, title, playlistId: json.id || '' };
 }
 
 /** 枚举单个播放列表 */
@@ -371,6 +454,7 @@ module.exports = {
   parseTarget,
   enumerateChannel,
   enumeratePlaylist,
+  playlistItems,
   probeVideo,
   dumpFlat,
   normalizeEntry,
