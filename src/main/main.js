@@ -150,6 +150,22 @@ function channelCacheFile(base) {
 
 // ---------------------------------------------------------------- IPC
 
+/**
+ * 本次运行内已抓取过的频道 / 播放列表（内存缓存，【无过期时间】）。
+ * 磁盘缓存有 30 分钟 TTL，超过就重新抓；这里保证「本次打开程序抓过一次，
+ * 之后再回来切换就绝不再抓」——多个博主之间来回切换是秒开的。
+ * 用户点「重新抓取」时仍然会绕过它。
+ */
+const sessionCache = new Map();
+
+/** 会话缓存键：与磁盘缓存用同一套来源，保证一致 */
+function sessionKeyOf(target, input) {
+  return String(target.url || target.channelBase || input || '')
+    .trim()
+    .replace(/\/+$/, '')
+    .toLowerCase();
+}
+
 function registerIpc() {
   ipcMain.handle('app:info', async () => ({
     version: app.getVersion(),
@@ -385,12 +401,29 @@ function registerIpc() {
         };
       }
 
+      // 本次运行内抓过的直接复用，不再发任何请求
+      const skey = sessionKeyOf(target, input);
+      if (!force && skey && sessionCache.has(skey)) {
+        const hit = sessionCache.get(skey);
+        send({ phase: 'cache', label: '本次已抓取过，直接复用' });
+        return {
+          ok: true,
+          data: hit.data,
+          cached: true,
+          sessionCached: true,
+          cacheAgeSec: Math.round((Date.now() - hit.ts) / 1000),
+        };
+      }
+
       const cacheFile = channelCacheFile(target.url || target.channelBase || input);
       if (!force && fs.existsSync(cacheFile)) {
         try {
           const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
           const age = Date.now() - (cached.ts || 0);
           if (cached.data && age < 30 * 60 * 1000) {
+            // 磁盘缓存命中也必须写进会话缓存，否则主页的「本次已抓取」里看不到它，
+            // 用户就没法从主页快速切回来（实测踩过：两个频道都命中磁盘缓存时面板是空的）。
+            if (skey) sessionCache.set(skey, { ts: Date.now(), data: cached.data });
             send({ phase: 'cache', label: '使用 30 分钟内的缓存列表' });
             return { ok: true, data: cached.data, cached: true, cacheAgeSec: Math.round(age / 1000) };
           }
@@ -419,6 +452,7 @@ function registerIpc() {
       if (!out.ok) return { ok: false, error: out.error || '识别失败' };
 
       const data = Object.assign({}, out.result, { targetKind: target.kind });
+      if (skey) sessionCache.set(skey, { ts: Date.now(), data });
       try {
         fs.writeFileSync(cacheFile, JSON.stringify({ ts: Date.now(), data }), 'utf8');
       } catch (_) {}
@@ -441,6 +475,32 @@ function registerIpc() {
     } catch (err) {
       return { ok: false, error: String((err && err.message) || err).slice(0, 300) };
     }
+  });
+
+  /** 本次运行内已抓取过的列表（用于主页的快速切换） */
+  ipcMain.handle('channel:session-list', () => {
+    const list = [];
+    for (const [url, v] of sessionCache.entries()) {
+      const ch = (v.data && v.data.channel) || {};
+      list.push({
+        url,
+        title: ch.title || url,
+        avatar: ch.avatar || '',
+        handle: ch.handle || '',
+        targetKind: (v.data && v.data.targetKind) || 'channel',
+        items: ((v.data && v.data.items) || []).length,
+        ts: v.ts,
+      });
+    }
+    list.sort((a, b) => b.ts - a.ts);
+    return { ok: true, list };
+  });
+
+  /** 清掉会话缓存里的一条（主页上右键移除用） */
+  ipcMain.handle('channel:session-forget', (_e, url) => {
+    const k = String(url || '').trim().replace(/\/+$/, '').toLowerCase();
+    sessionCache.delete(k);
+    return { ok: true };
   });
 
   ipcMain.handle('channel:cancel', async () => {

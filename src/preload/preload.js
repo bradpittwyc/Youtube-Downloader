@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld('api', {
     cancel: () => ipcRenderer.invoke('channel:cancel'),
     clearCache: (input) => ipcRenderer.invoke('channel:clear-cache', input),
     playlistItems: (payload) => ipcRenderer.invoke('channel:playlist-items', payload),
+    sessionList: () => ipcRenderer.invoke('channel:session-list'),
+    sessionForget: (url) => ipcRenderer.invoke('channel:session-forget', url),
     onProgress: (cb) => on('channel:progress', cb),
   },
 

@@ -429,9 +429,44 @@ function clearChannelView() {
   state.data = null;
   state.selected.clear();
   state.renderedCount = 0;
+  state.playlistVideos = {};
+  state.playlistLoading.clear();
   $('channelView').classList.add('hidden');
   $('emptyState').classList.remove('hidden');
   $('list').innerHTML = '';
+  $('btnRefresh').classList.add('hidden');
+  $('chCacheInfo').textContent = '';
+  loadSessionChannels();
+}
+
+/* ==================== 本次已抓取（会话缓存，用于快速切换） ==================== */
+
+async function loadSessionChannels() {
+  try {
+    const r = await api.channel.sessionList();
+    const list = (r && r.list) || [];
+    const box = $('sessionChannels');
+    const wrap = $('scList');
+    if (!list.length) {
+      box.classList.add('hidden');
+      return;
+    }
+    box.classList.remove('hidden');
+    wrap.innerHTML = list
+      .map((c) => {
+        const kind = c.targetKind === 'playlist' ? '播放列表' : c.targetKind === 'video' ? '单个视频' : '频道';
+        return `<button class="rc-item" data-sc-url="${esc(c.url)}" title="${esc(
+          `${c.title}\n${kind} · ${c.items} 个内容\n点击直接切回（不会重新抓取）`
+        )}">
+          <img class="rc-avatar" loading="lazy" src="${esc(c.avatar || '')}" />
+          <span class="rc-name">${esc(c.title)}</span>
+          <span class="rc-count" style="background:#3a4a6b">${c.items}</span>
+        </button>`;
+      })
+      .join('');
+  } catch (err) {
+    console.error('loadSessionChannels failed:', err && err.message);
+  }
 }
 
 function renderChannel(data) {
@@ -654,7 +689,9 @@ async function doFetch(force) {
 
   const data = res.data;
   renderChannel(data);
-  if (res.cached) {
+  if (res.sessionCached) {
+    $('chCacheInfo').textContent = '（本次已抓取，直接复用）';
+  } else if (res.cached) {
     $('chCacheInfo').textContent = `（缓存 ${Math.round((res.cacheAgeSec || 0) / 60)} 分钟前）`;
   } else {
     $('chCacheInfo').textContent = '';
@@ -800,6 +837,27 @@ function bind() {
   $('btnFetch').addEventListener('click', () => doFetch(false));
   $('btnRefresh').addEventListener('click', () => doFetch(true));
   $('btnCancelFetch').addEventListener('click', () => api.channel.cancel());
+
+  // 返回主页：本次抓取过的博主会留在主页上，可以直接切回来
+  $('btnBackHome').addEventListener('click', () => {
+    clearChannelView();
+    $('urlInput').value = '';
+  });
+
+  // 本次已抓取：点击直接切回（命中会话缓存，不会再抓）
+  $('scList').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-sc-url]');
+    if (!btn) return;
+    if (state.fetching) {
+      toast('正在识别中，请稍候…', 'warn');
+      return;
+    }
+    const url = btn.getAttribute('data-sc-url');
+    const name = btn.querySelector('.rc-name')?.textContent || url;
+    $('urlInput').value = url;
+    toast(`切换到「${name}」（本次已抓取，直接复用）`, 'ok', 2500);
+    doFetch(false);
+  });
 
   // 最近下载的博主：点击 = 填入链接并【直接开始识别】，不用再点一次
   $('rcList').addEventListener('click', (e) => {

@@ -55,7 +55,16 @@
             <div><code>watch?v=...</code><span>单个视频</span></div>
           </div>
 
-          <!-- 最近下载的博主：按下载数倒序，点一下即填入链接 -->
+          <!-- 本次运行内抓取过的博主 / 播放列表：点击直接切回，不会重新抓取 -->
+          <div id="sessionChannels" class="recent-channels hidden">
+            <div class="rc-head">
+              <span>本次已抓取</span>
+              <span class="muted">点一下直接切回，不会重新抓取 · 关闭程序后清空</span>
+            </div>
+            <div id="scList" class="rc-list"></div>
+          </div>
+
+          <!-- 最近下载的博主：按下载数倒序，点一下直接抓取最新内容 -->
           <div id="recentChannels" class="recent-channels hidden">
             <div class="rc-head">
               <span>最近下载的博主</span>
@@ -76,6 +85,13 @@
                 <span id="chCacheInfo" class="cache-info"></span>
               </div>
             </div>
+            <button
+              id="btnBackHome"
+              class="btn ghost"
+              title="返回主页。本次抓取过的博主都会留在主页上，可以直接切回来（不会再重新抓取）"
+            >
+              ← 返回
+            </button>
           </div>
 
           <div id="warnings" class="warnings"></div>

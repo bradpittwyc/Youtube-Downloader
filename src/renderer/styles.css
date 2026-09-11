@@ -332,6 +332,15 @@ input::placeholder {
   align-items: center;
   padding: 14px 16px 10px;
 }
+.channel-head .ch-meta {
+  flex: 1;
+  min-width: 0;
+}
+#btnBackHome {
+  flex-shrink: 0;
+  align-self: flex-start;
+  margin-top: 2px;
+}
 .ch-avatar {
   width: 44px;
   height: 44px;
