@@ -249,6 +249,17 @@
                 >每个视频单独建一个文件夹（文件夹名用上面的模板，该视频的视频/音频/字幕/文档全部放进去）</span
               ></label
             >
+            <div class="inline" style="margin-top: 8px; align-items: center; gap: 8px">
+              <span class="muted">博主母文件夹命名</span>
+              <select id="setChannelFolderName" class="select-sm">
+                <option value="handle">@频道名（如 @lexfridman）</option>
+                <option value="id">频道 ID（如 UCSHZKyawb77ixDdsGog4iWA）</option>
+                <option value="title">频道显示名（如 Lex Fridman）</option>
+              </select>
+              <small class="muted"
+                >以博主主页抓取的内容会先在下载目录下建这层母文件夹，视频文件夹放在它里面；已存在则直接复用</small
+              >
+            </div>
           </div>
 
           <div class="setting-row">

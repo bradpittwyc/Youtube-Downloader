@@ -929,6 +929,15 @@ input::placeholder {
   gap: 10px;
   flex-wrap: wrap;
 }
+.select-sm {
+  padding: 5px 8px;
+  font-size: 12px;
+  background: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  font-family: inherit;
+}
 .color-row input[type='color'] {
   width: 40px;
   height: 26px;

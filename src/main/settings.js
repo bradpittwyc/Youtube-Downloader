@@ -77,6 +77,13 @@ const DEFAULTS = {
    * 该视频的视频/音频/字幕/ASS/学习文档全部放进去，避免下载目录被大量文件铺满。
    */
   organizeInFolder: true,
+  /**
+   * 博主母文件夹的命名方式（以博主主页抓取的内容才会套这层母文件夹）：
+   *   handle → @lexfridman（易读，默认）
+   *   id     → UCSHZKyawb77ixDdsGog4iWA（YouTube 内部频道 ID，最稳定）
+   *   title  → Lex Fridman（频道显示名，可能含空格/特殊字符）
+   */
+  channelFolderName: 'handle',
   skipDownloaded: true,
   rateLimit: '', // 例如 '2M'，空 = 不限速
   proxy: '',

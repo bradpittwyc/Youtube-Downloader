@@ -708,6 +708,7 @@ async function loadSettingsToForm() {
   $('setAutoRetry').value = s.autoRetry == null ? 3 : s.autoRetry;
   $('setFilename').value = s.filenameTemplate || '';
   $('setOrganizeInFolder').checked = s.organizeInFolder !== false;
+  $('setChannelFolderName').value = s.channelFolderName || 'handle';
   $('setReadPlaylists').checked = s.readPlaylists !== false;
   $('setRateLimit').value = s.rateLimit || '';
   $('setProxy').value = s.proxy || '';
@@ -1076,6 +1077,7 @@ function bind() {
       autoRetry: Number($('setAutoRetry').value) || 0,
       filenameTemplate: $('setFilename').value.trim() || '%(title)s [%(id)s].%(ext)s',
       organizeInFolder: $('setOrganizeInFolder').checked,
+      channelFolderName: $('setChannelFolderName').value,
       readPlaylists: $('setReadPlaylists').checked,
       rateLimit: $('setRateLimit').value.trim(),
       proxy: $('setProxy').value.trim(),
@@ -1178,11 +1180,13 @@ function bind() {
 }
 
 async function enqueue(items) {
-  // 记录这批视频所属的博主，下载成功后会在主进程累加计数
+  // 记录这批视频所属的博主：既用于下载计数，也用于决定「博主母文件夹」的名字
   const d = state.data || {};
   const ch = d.channel || {};
   const channelRef =
-    d.targetKind === 'channel' && ch.url ? { url: ch.url, title: ch.title || '', avatar: ch.avatar || '' } : null;
+    d.targetKind === 'channel' && ch.url
+      ? { url: ch.url, title: ch.title || '', avatar: ch.avatar || '', handle: ch.handle || '', id: ch.id || '' }
+      : null;
 
   const res = await api.queue.add(items, {
     quality: $('qualitySelect').value,

@@ -61,22 +61,62 @@ const POSTPROCESS_LABEL = {
 
 const TERMINAL = new Set(['done', 'error', 'canceled', 'skipped']);
 
+/** Windows 文件夹名不能包含这些字符，也不能以点或空格结尾 */
+function sanitizeFolderName(s) {
+  let out = String(s == null ? '' : s).trim();
+  out = out.replace(/[\\/:*?"<>|]/g, '_');
+  out = out.replace(/[\x00-\x1f]/g, '');
+  out = out.replace(/[. ]+$/, '');
+  if (out.length > 80) out = out.slice(0, 80).trim();
+  return out;
+}
+
+/** 从频道主页地址里取出 @handle */
+function handleFromUrl(url) {
+  const m = String(url || '').match(/@([A-Za-z0-9._-]+)/);
+  return m ? `@${m[1]}` : '';
+}
+
+/**
+ * 「博主母文件夹」的名字。
+ * 以博主主页抓取的内容会先在下载目录下建一个以此命名的母文件夹，
+ * 每个视频自己的文件夹放在它里面；同名则直接复用已存在的文件夹。
+ */
+function channelFolderOf(ref, settings) {
+  if (!ref || !ref.url) return '';
+  const handle = ref.handle || handleFromUrl(ref.url);
+  const id = ref.id || '';
+  const title = ref.title || '';
+  const mode = (settings && settings.channelFolderName) || 'handle';
+  let raw = mode === 'id' ? id : mode === 'title' ? title : handle;
+  if (!raw) raw = handle || title || id; // 兜底：handle → 名称 → 频道ID
+  return sanitizeFolderName(raw);
+}
+
 /**
  * 把一个文件名模板变成「文件夹/文件名」的嵌套模板。
  * 例：%(title)s [%(upload_date>%Y-%m-%d)s].%(ext)s
- *   → %(title)s [%(upload_date>%Y-%m-%d)s]/%(title)s [%(upload_date>%Y-%m-%d)s].%(ext)s
- * yt-dlp 的 -o 模板里带 / 就会自动创建目录，因此视频、字幕、ASS、Word 会一起落进同一个文件夹。
+ *   → @lexfridman/%(title)s [%(upload_date>%Y-%m-%d)s]/%(title)s [%(upload_date>%Y-%m-%d)s].%(ext)s
+ *          ↑博主母文件夹        ↑每个视频自己的文件夹
+ * yt-dlp 的 -o 模板里带 / 就会自动创建目录（已存在则直接复用）。
  */
 function effectiveTemplate(opts) {
   const t = String((opts && opts.filenameTemplate) || '%(title)s [%(upload_date>%Y-%m-%d)s].%(ext)s');
-  if (opts && opts.organizeInFolder === false) return t;
-  // 用去掉扩展名后的模板作为文件夹名
-  const folder = t.replace(/\.%\(ext\)s\s*$/i, '');
-  if (!folder || folder === t) {
-    // 模板里没有 %(ext)s（yt-dlp 会自己补扩展名），退化为「模板目录/模板」
-    return `${t}/%(title)s.%(ext)s`;
+  const segs = [];
+  // 博主母文件夹是字面量，插进 yt-dlp 模板前要把 % 转义成 %%（否则会被当成模板占位符）
+  if (opts && opts.channelFolder) segs.push(String(opts.channelFolder).replace(/%/g, '%%'));
+  if (!(opts && opts.organizeInFolder === false)) {
+    // 用去掉扩展名后的模板作为每个视频的文件夹名
+    const folder = t.replace(/\.%\(ext\)s\s*$/i, '');
+    if (!folder || folder === t) {
+      // 模板里没有 %(ext)s（yt-dlp 会自己补扩展名），退化为「模板/%(title)s.%(ext)s」
+      segs.push(t, '%(title)s.%(ext)s');
+      return segs.join('/');
+    }
+    segs.push(folder);
   }
-  return `${folder}/${t}`;
+  segs.push(t);
+  return segs.join('/');
 }
 
 /**
@@ -315,6 +355,12 @@ class DownloadQueue extends EventEmitter {
       embedThumbnail: settings.embedThumbnail !== false,
       /** 这一批视频所属的博主，用于下载成功后累加计数 */
       channel: batchOpts.channel || null,
+      /**
+       * 博主母文件夹名。以博主主页抓取的内容会先建这个母文件夹，
+       * 每个视频自己的文件夹放在它里面；同名则直接复用已存在的文件夹。
+       * 单集视频 / 直接粘贴播放列表的场景为空（不套母文件夹）。
+       */
+      channelFolder: batchOpts.channel ? channelFolderOf(batchOpts.channel, settings) : '',
     };
     paths.ensureDir(opts.outputDir);
 
@@ -1184,4 +1230,6 @@ module.exports = {
   fmtUploadDate,
   uploadDateFromPath,
   effectiveTemplate,
+  channelFolderOf,
+  sanitizeFolderName,
 };
