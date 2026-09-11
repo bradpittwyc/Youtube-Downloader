@@ -412,7 +412,9 @@
           </div>
 
           <div class="setting-row checks">
-            <label class="check"><input type="checkbox" id="setSkipDownloaded" /><span>跳过已下载过的视频</span></label>
+            <label class="check" title="开启时：磁盘上已有同名文件就跳过。关闭时：先删掉旧文件再重新下载。&#10;注意：判断依据是文件是否真的在磁盘上，不是历史记录——所以手动删掉文件后再下会正常重下。"
+              ><input type="checkbox" id="setSkipDownloaded" /><span>跳过磁盘上已存在的文件</span></label
+            >
             <label class="check"><input type="checkbox" id="setEmbedMeta" /><span>写入元数据</span></label>
             <label class="check"><input type="checkbox" id="setEmbedThumb" /><span>音频嵌入封面</span></label>
             <label class="check">

@@ -79,6 +79,15 @@ function effectiveTemplate(opts) {
   return `${folder}/${t}`;
 }
 
+/**
+ * 下载规格：决定"同一个视频的两个任务算不算同一份"。
+ * 只包含【影响视频文件本身】的选项；不含 audioOnly / 字幕 / 学习文档，
+ * 因为那些都能从已有的视频文件派生出来，不该触发重新下载。
+ */
+function downloadSpec(o) {
+  return `${(o && o.quality) || 'best'}|${(o && o.videoCodec) || 'quality'}`;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -231,6 +240,8 @@ class DownloadQueue extends EventEmitter {
         eta: it.eta == null ? null : it.eta,
         stage: it.stage || '',
         filePath: it.filePath || '',
+        /** 文件是否还在磁盘上——用户可能手动删了，不能只凭历史状态判定"已下载" */
+        fileExists: !!(it.filePath && fs.existsSync(it.filePath)),
         audioPath: it.audioPath || '',
         audioError: it.audioError || '',
         extractingAudio: !!it.extractingAudio,
@@ -320,12 +331,26 @@ class DownloadQueue extends EventEmitter {
       // 重新下载同一视频时，只有在「输出目录没变 且 旧文件仍在」的情况下才沿用旧路径。
       // 否则会继承一个已经不存在的/别的目录的路径，导致「打开文件夹」指错地方，
       // 也会让后续的音频导出从错误的源文件里抽轨（踩坑：测试间互相污染就是这个问题）。
+      //
+      // replaceFile：以下两种情况必须先把旧文件删掉，否则 yt-dlp 会因为
+      // 「目标文件名已存在」而直接跳过——文件名模板里不含清晰度，换个清晰度还是同一个文件名：
+      //   1) 清晰度 / 编码策略变了 —— 用户明确要另一份
+      //   2) 用户关掉了「跳过已下载」 —— 明确要求重下
+      const spec = downloadSpec(opts);
+      const specChanged = !!(existing && existing.dlSpec && existing.dlSpec !== spec);
+      const oldFileAlive = !!(existing && existing.filePath && fs.existsSync(existing.filePath));
+      const needReplace = oldFileAlive && (specChanged || opts.skipDownloaded === false);
+      const replaceFile = needReplace ? existing.filePath : '';
+      const replaceAudio =
+        needReplace && existing.audioPath && fs.existsSync(existing.audioPath) ? existing.audioPath : '';
+
       const canInherit =
         existing &&
         existing.opts &&
         existing.opts.outputDir === opts.outputDir &&
         existing.filePath &&
-        fs.existsSync(existing.filePath)
+        oldFileAlive &&
+        !needReplace
           ? existing.filePath
           : '';
       const item = {
@@ -344,6 +369,11 @@ class DownloadQueue extends EventEmitter {
         height: 0,
         url: it.url || `https://www.youtube.com/watch?v=${it.id}`,
         opts: Object.assign({}, opts),
+        /** 本次下载的规格（清晰度+编码策略），用来判断"换个清晰度重下" */
+        dlSpec: spec,
+        /** 需要先删掉的旧文件（换清晰度 / 强制重下时） */
+        replaceFile,
+        replaceAudio,
         status: 'queued',
         progress: 0,
         downloadedBytes: 0,
@@ -415,6 +445,24 @@ class DownloadQueue extends EventEmitter {
       return;
     }
 
+    // 换清晰度 / 强制重下：先把旧文件和它的分片清掉。
+    // 文件名模板里不含清晰度，不清掉的话 yt-dlp 会认为"已经下载过"而直接跳过。
+    if (item.replaceFile || item.replaceAudio) {
+      const targets = [item.replaceFile, item.replaceAudio].filter(Boolean);
+      for (const f of targets) {
+        for (const p of [f, `${f}.part`, `${f}.ytdl`]) {
+          try {
+            fs.rmSync(p, { force: true });
+          } catch (_) {}
+        }
+      }
+      console.log(`[queue] 已清除旧文件以便重新下载: ${targets.map((x) => path.basename(x)).join(', ')}`);
+      item.stage = '已清除旧文件，按新清晰度重新下载';
+      item.replaceFile = '';
+      item.replaceAudio = '';
+      item.audioPath = '';
+    }
+
     const args = this._buildArgs(item, settings, bin, ffDir);
     item.status = 'downloading';
     item.error = '';
@@ -483,9 +531,13 @@ class DownloadQueue extends EventEmitter {
       effectiveTemplate(o),
     ];
 
-    if (o.skipDownloaded) a.push('--download-archive', paths.archiveFile());
-    if (o.rateLimit) a.push('--limit-rate', o.rateLimit);
-    if (o.proxy) a.push('--proxy', o.proxy);
+    // 注意：这里【不用】--download-archive。
+    // 它按视频 ID 记账，一旦记上就无条件跳过——既不检查文件是否还在，
+    // 也不区分清晰度，会导致「删了文件仍判为已下载」「换个清晰度下不动」（实测踩过）。
+    // 改为依赖 yt-dlp 的默认行为：目标文件已存在就跳过，不存在就下载。
+    // 文件名模板不含清晰度，所以要换清晰度时必须先把旧文件删掉（见 _start 里的 replaceFile）。
+
+    if (o.rateLimit) a.push('--limit-rate', o.rateLimit);    if (o.proxy) a.push('--proxy', o.proxy);
     if (o.cookieFile) a.push('--cookies', o.cookieFile);
 
     if (o.audioOnly) {

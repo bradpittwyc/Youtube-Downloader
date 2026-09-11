@@ -49,10 +49,16 @@ const state = {
   fetching: false,
 };
 
-/** 已下载完成的视频 id 集合（done / skipped） */
+/**
+ * 已下载完成的视频 id 集合。
+ * 必须同时确认【文件还在磁盘上】——用户可能把文件删了，
+ * 这时不能只凭历史状态就说"已下载"，否则重新下载会被永久跳过（实测踩过）。
+ */
 function doneKeys() {
   return new Set(
-    state.queue.filter((q) => q.status === 'done' || q.status === 'skipped').map((q) => q.key)
+    state.queue
+      .filter((q) => (q.status === 'done' || q.status === 'skipped') && q.fileExists !== false)
+      .map((q) => q.key)
   );
 }
 
