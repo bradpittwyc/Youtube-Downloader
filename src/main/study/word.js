@@ -29,8 +29,14 @@ const {
   ShadingType,
 } = require('docx');
 
-const FONT = { ascii: 'Georgia', hAnsi: 'Georgia', eastAsia: '微软雅黑' };
-const FONT_UI = { ascii: 'Segoe UI', hAnsi: 'Segoe UI', eastAsia: '微软雅黑' };
+/**
+ * 字体：所有英文（含音标）一律 Times New Roman，中文用微软雅黑。
+ * 用 ascii/hAnsi 指定西文、eastAsia 指定中文——docx 会把同一段里的中英文分别套用，
+ * 否则中文会被西文字体接管，或者音标里的 IPA 字符（ˈ ə ʊ 等）掉进回退字体、间距错乱。
+ */
+const LATIN = 'Times New Roman';
+const FONT = { ascii: LATIN, hAnsi: LATIN, eastAsia: '微软雅黑' };
+const FONT_UI = { ascii: LATIN, hAnsi: LATIN, eastAsia: '微软雅黑' };
 
 const GRAY = '808080';
 const DARK = '1F1F1F';
@@ -107,9 +113,9 @@ async function buildStudyDocx(input) {
   const metaBits = [];
   if (meta.channel) metaBits.push(`频道：${meta.channel}`);
   if (meta.durationMs) metaBits.push(`时长：${fmtDuration(meta.durationMs)}`);
+  // 上传日期（由下载时抓取，缺失时回退到文件名里的 [YYYY-MM-DD]）
   if (meta.uploadDate) metaBits.push(`上传：${meta.uploadDate}`);
   if (meta.url) metaBits.push(`链接：${meta.url}`);
-  metaBits.push(`生成：${new Date().toLocaleString('zh-CN', { hour12: false })}`);
   for (const b of metaBits) {
     children.push(new Paragraph({ style: 'MetaLine', children: runs(b, FONT_UI, { size: 18, color: GRAY }) }));
   }

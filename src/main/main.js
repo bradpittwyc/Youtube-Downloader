@@ -15,7 +15,8 @@ const channel = require('./channel');
 const study = require('./study');
 const studyLlm = require('./study/llm');
 const secret = require('./study/secret');
-const { DownloadQueue } = require('./queue');
+const queueMod = require('./queue');
+const { DownloadQueue } = queueMod;
 
 const queue = new DownloadQueue();
 
@@ -267,7 +268,7 @@ function registerIpc() {
           title: item.title,
           channel: item.channel,
           durationMs: (Number(item.duration) || 0) * 1000,
-          uploadDate: '',
+          uploadDate: queueMod.fmtUploadDate(item.uploadDate) || queueMod.uploadDateFromPath(item.filePath),
           url: item.url,
         },
         settings,

@@ -64,6 +64,23 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+/** '20260823' → '2026-08-23'；拿不到就返回空串 */
+function fmtUploadDate(v) {
+  const s = String(v || '').trim();
+  if (/^\d{8}$/.test(s)) return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  return '';
+}
+
+/**
+ * 上传日期的兜底：从文件名里抠 [YYYY-MM-DD]。
+ * 默认文件名模板就是「标题 [上传日期]」，所以老任务（下载时还没抓这个字段）也能补上。
+ */
+function uploadDateFromPath(p) {
+  const m = String(p || '').match(/\[(\d{4}-\d{2}-\d{2})\]/);
+  return m ? m[1] : '';
+}
+
 /**
  * 收集与视频同名的字幕文件（如 `标题 [2026-08-23].zh-Hans.srt`）。
  * 字幕由 yt-dlp 直接落盘，路径不经过 --print，因此这里用同名前缀扫目录。
@@ -295,6 +312,7 @@ class DownloadQueue extends EventEmitter {
         liveStatus: it.liveStatus || null,
         thumbnail: it.thumbnail || '',
         duration: it.duration || null,
+        uploadDate: '', // 下载开始时由 META| 行填充（YYYYMMDD）
         url: it.url || `https://www.youtube.com/watch?v=${it.id}`,
         opts: Object.assign({}, opts),
         status: 'queued',
@@ -405,6 +423,10 @@ class DownloadQueue extends EventEmitter {
       'download:DL|%(progress.status)s|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.eta)s|%(progress.filename)s',
       '--progress-template',
       'postprocess:PP|%(progress.status)s|%(progress.postprocessor)s',
+      // 下载开始前拿一次准确的元信息（上传日期/时长/频道），供文件名与学习文档使用。
+      // 时长和上传日期放前面、频道放最后：频道名里万一有 | 也只影响尾部。
+      '--print',
+      'before_dl:META|%(duration)s|%(upload_date)s|%(channel)s',
       // 下载完成后的真实落盘路径
       '--print',
       'after_move:FINAL|%(filepath)s',
@@ -495,6 +517,16 @@ class DownloadQueue extends EventEmitter {
       item.stage = status === 'finished' ? `${label} 完成` : `${label}…`;
       item.speed = 0;
       item.eta = null;
+      this.changed();
+      return;
+    }
+    if (line.startsWith('META|')) {
+      const p = line.split('|');
+      const dur = num(p[1]);
+      if (dur != null && dur > 0) item.duration = Math.round(dur);
+      if (p[2] && p[2] !== 'NA') item.uploadDate = p[2]; // YYYYMMDD
+      const ch = p.slice(3).join('|').trim();
+      if (ch && !item.channel) item.channel = ch;
       this.changed();
       return;
     }
@@ -849,7 +881,7 @@ class DownloadQueue extends EventEmitter {
           title: item.title,
           channel: item.channel,
           durationMs: durationSec * 1000,
-          uploadDate: '',
+          uploadDate: fmtUploadDate(item.uploadDate) || uploadDateFromPath(item.filePath),
           url: item.url,
         },
         settings,
@@ -1016,4 +1048,11 @@ class DownloadQueue extends EventEmitter {
   }
 }
 
-module.exports = { DownloadQueue, QUALITY_LIMIT, buildFormat, POSTPROCESS_LABEL };
+module.exports = {
+  DownloadQueue,
+  QUALITY_LIMIT,
+  buildFormat,
+  POSTPROCESS_LABEL,
+  fmtUploadDate,
+  uploadDateFromPath,
+};
