@@ -255,6 +255,70 @@ input::placeholder {
   font-size: 11.5px;
 }
 
+/* ================= 最近下载的博主 ================= */
+.recent-channels {
+  margin-top: 26px;
+  width: 100%;
+  max-width: 720px;
+}
+.rc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+.rc-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+.rc-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  cursor: pointer;
+  font-family: inherit;
+  color: var(--text);
+  font-size: 12.5px;
+  transition: border-color 0.15s, background 0.15s;
+  max-width: 260px;
+}
+.rc-item:hover {
+  border-color: var(--accent);
+  background: var(--bg-3);
+}
+.rc-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-3);
+  flex-shrink: 0;
+}
+.rc-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rc-count {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 9px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
 /* ================= 频道头 ================= */
 #channelView {
   display: flex;

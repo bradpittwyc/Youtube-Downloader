@@ -15,6 +15,7 @@ const channel = require('./channel');
 const study = require('./study');
 const studyLlm = require('./study/llm');
 const secret = require('./study/secret');
+const channelsStore = require('./channels-store');
 const queueMod = require('./queue');
 const { DownloadQueue } = queueMod;
 
@@ -459,6 +460,19 @@ function registerIpc() {
     return true;
   });
 
+  // ---- 最近下载的博主（首页快捷入口）----
+  ipcMain.handle('channels:top', (_e, limit) => {
+    try {
+      return { ok: true, list: channelsStore.top(Number(limit) || 12) };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err), list: [] };
+    }
+  });
+  ipcMain.handle('channels:remove', (_e, url) => {
+    channelsStore.remove(url);
+    return { ok: true, list: channelsStore.top(12) };
+  });
+
   // ---- 下载队列 ----
   ipcMain.handle('queue:add', (_e, { items, options }) => queue.add(items || [], options || {}));
   ipcMain.handle('queue:list', () => ({ items: queue.snapshot(), stats: queue.stats() }));
@@ -510,6 +524,50 @@ function registerIpc() {
     if (p && fs.existsSync(p)) shell.showItemInFolder(p);
     return true;
   });
+}
+
+/**
+ * 一次性回填「最近下载的博主」。
+ * 新版本会在下载成功时直接记录博主信息，但老版本下载的任务只有频道【名字】没有 URL，
+ * 因此这里借频道缓存（里面存着每个频道的完整识别结果，含 title 和 url）建立 名字→URL 映射，
+ * 把历史下载补进统计。用设置里的标记保证只跑一次，避免每次启动重复累加。
+ */
+function backfillChannelHistory() {
+  try {
+    const settings = settingsStore.load();
+    if (settings.channelsBackfilled) return;
+    settingsStore.save({ channelsBackfilled: true });
+
+    const dir = paths.cacheDir();
+    const byTitle = new Map();
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith('.json')) continue;
+      try {
+        const j = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+        const ch = j && j.data && j.data.channel;
+        if (ch && ch.title && ch.url) byTitle.set(ch.title, { url: ch.url, avatar: ch.avatar || '' });
+      } catch (_) {}
+    }
+    if (!byTitle.size) return;
+
+    const counts = new Map();
+    for (const it of queue.items.values()) {
+      if (it.status !== 'done' && it.status !== 'skipped') continue;
+      if (it.channelRef && it.channelRef.url) continue; // 新任务已经记过了
+      if (!it.channel) continue;
+      counts.set(it.channel, (counts.get(it.channel) || 0) + 1);
+    }
+    let n = 0;
+    for (const [name, cnt] of counts) {
+      const ref = byTitle.get(name);
+      if (!ref) continue;
+      channelsStore.bump({ url: ref.url, title: name, avatar: ref.avatar }, cnt);
+      n += cnt;
+    }
+    if (n) console.log(`[channels] 已从历史下载回填 ${n} 条记录，覆盖 ${counts.size} 个频道`);
+  } catch (err) {
+    console.error('[channels] backfill failed:', err && err.message);
+  }
 }
 
 // ---------------------------------------------------------------- 窗口
@@ -613,6 +671,7 @@ app.whenReady().then(() => {
   });
   registerIpc();
   createWindow();
+  backfillChannelHistory();
   // 启动后自动继续上次未完成的任务（断点续传）
   setTimeout(() => queue.pump(), 1500);
 });

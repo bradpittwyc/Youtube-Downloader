@@ -39,6 +39,11 @@ contextBridge.exposeInMainWorld('api', {
     onProgress: (cb) => on('channel:progress', cb),
   },
 
+  channels: {
+    top: (limit) => ipcRenderer.invoke('channels:top', limit),
+    remove: (url) => ipcRenderer.invoke('channels:remove', url),
+  },
+
   queue: {
     add: (items, options) => ipcRenderer.invoke('queue:add', { items, options }),
     list: () => ipcRenderer.invoke('queue:list'),

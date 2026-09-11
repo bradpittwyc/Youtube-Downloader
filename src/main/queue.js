@@ -12,6 +12,7 @@ const ytdlp = require('./ytdlp');
 const paths = require('./paths');
 const settingsStore = require('./settings');
 const study = require('./study');
+const channelsStore = require('./channels-store');
 
 /**
  * 分辨率上限（只限制高度，具体编码由编码策略决定）
@@ -301,6 +302,8 @@ class DownloadQueue extends EventEmitter {
       liveFromStart: !!settings.liveFromStart,
       embedMetadata: settings.embedMetadata !== false,
       embedThumbnail: settings.embedThumbnail !== false,
+      /** 这一批视频所属的博主，用于下载成功后累加计数 */
+      channel: batchOpts.channel || null,
     };
     paths.ensureDir(opts.outputDir);
 
@@ -330,6 +333,8 @@ class DownloadQueue extends EventEmitter {
         id: it.id,
         title: it.title,
         channel: it.channel || '',
+        /** 所属博主（用于首页「最近下载的博主」计数）：{ url, title, avatar } */
+        channelRef: opts.channel || null,
         section: it.section || 'videos',
         liveStatus: it.liveStatus || null,
         thumbnail: it.thumbnail || '',
@@ -364,6 +369,8 @@ class DownloadQueue extends EventEmitter {
         _files: {},
       };
       this.items.set(key, item);
+      // channelRef 已经单独存在 item 上，从 opts 里删掉避免每条任务重复存一份
+      if (item.opts) delete item.opts.channel;
       added++;
     }
     this.changed(true);
@@ -622,6 +629,14 @@ class DownloadQueue extends EventEmitter {
       item.stage = isSkip ? '已存在，跳过' : '已完成';
       item.error = '';
       item.finishedAt = nowIso();
+      // 给所属博主的下载数 +1（用于首页「最近下载的博主」按下载数排序）
+      if (item.channelRef && item.channelRef.url) {
+        try {
+          channelsStore.bump(item.channelRef, 1);
+        } catch (err) {
+          console.error('[queue] channels bump failed:', err && err.message);
+        }
+      }
       item.subPaths = collectSubtitleFiles(item.filePath);
       this.changed(true);
       this.pump();

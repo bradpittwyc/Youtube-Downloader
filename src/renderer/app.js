@@ -58,6 +58,8 @@ function doneKeys() {
 
 /** 「已下载集合」的签名，用来判断是否需要因为下载完成而刷新列表 */
 let doneSig = '';
+/** 已完成任务数，用来判断博主下载数是否变化 */
+let lastDoneCount = -1;
 
 const $ = (id) => document.getElementById(id);
 
@@ -589,6 +591,35 @@ function renderQueue() {
   $('queueBadge').textContent = (s.downloading || 0) + (s.queued || 0);
 }
 
+/* ==================== 最近下载的博主 ==================== */
+
+async function loadRecentChannels() {
+  try {
+    const r = await api.channels.top(12);
+    const list = (r && r.list) || [];
+    const box = $('recentChannels');
+    const wrap = $('rcList');
+    if (!list.length) {
+      box.classList.add('hidden');
+      return;
+    }
+    box.classList.remove('hidden');
+    wrap.innerHTML = list
+      .map(
+        (c) => `<button class="rc-item" data-rc-url="${esc(c.url)}" title="${esc(
+          `${c.title || c.url}\n累计下载 ${c.downloads || 0} 个\n点击填入链接`
+        )}">
+          <img class="rc-avatar" loading="lazy" src="${esc(c.avatar || '')}" />
+          <span class="rc-name">${esc(c.title || c.url)}</span>
+          <span class="rc-count">${c.downloads || 0}</span>
+        </button>`
+      )
+      .join('');
+  } catch (err) {
+    console.error('loadRecentChannels failed:', err && err.message);
+  }
+}
+
 /* ==================== 识别 ==================== */
 
 async function doFetch(force) {
@@ -758,6 +789,40 @@ function bind() {
   $('btnFetch').addEventListener('click', () => doFetch(false));
   $('btnRefresh').addEventListener('click', () => doFetch(true));
   $('btnCancelFetch').addEventListener('click', () => api.channel.cancel());
+
+  // 最近下载的博主：点击 = 填入链接并【直接开始识别】，不用再点一次
+  $('rcList').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-rc-url]');
+    if (!btn) return;
+    if (state.fetching) {
+      toast('正在识别中，请稍候…', 'warn');
+      return;
+    }
+    const url = btn.getAttribute('data-rc-url');
+    const name = btn.querySelector('.rc-name')?.textContent || url;
+    $('urlInput').value = url;
+    toast(`正在抓取「${name}」的最新内容…`, 'ok', 3000);
+    doFetch(false);
+  });
+  // 右键从列表移除
+  $('rcList').addEventListener('contextmenu', async (e) => {
+    const btn = e.target.closest('[data-rc-url]');
+    if (!btn) return;
+    e.preventDefault();
+    const url = btn.getAttribute('data-rc-url');
+    const name = btn.querySelector('.rc-name')?.textContent || url;
+    const ok = await api.dialog.confirm({
+      title: '移除记录',
+      message: `把「${name}」从最近下载列表里移除？`,
+      detail: '只是不再显示在这里，已下载的文件和队列记录都不受影响。',
+      confirmLabel: '移除',
+      type: 'question',
+    });
+    if (!ok) return;
+    const r = await api.channels.remove(url);
+    state.recentChannels = (r && r.list) || [];
+    loadRecentChannels();
+  });
   $('urlInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') doFetch(false);
   });
@@ -1089,6 +1154,12 @@ function bind() {
     state.queue = payload.items || [];
     state.stats = payload.stats || {};
     renderQueue();
+    // 有任务完成时博主下载数会变，顺带刷新首页的快捷入口
+    const doneCount = state.queue.filter((q) => q.status === 'done' || q.status === 'skipped').length;
+    if (doneCount !== lastDoneCount) {
+      lastDoneCount = doneCount;
+      loadRecentChannels();
+    }
     // 开着「仅显示未下载」时，某个视频下载完成后要把它从列表里摘掉
     if (state.showOnlyUndownloaded) {
       const sig = [...doneKeys()].sort().join(',');
@@ -1101,6 +1172,12 @@ function bind() {
 }
 
 async function enqueue(items) {
+  // 记录这批视频所属的博主，下载成功后会在主进程累加计数
+  const d = state.data || {};
+  const ch = d.channel || {};
+  const channelRef =
+    d.targetKind === 'channel' && ch.url ? { url: ch.url, title: ch.title || '', avatar: ch.avatar || '' } : null;
+
   const res = await api.queue.add(items, {
     quality: $('qualitySelect').value,
     audioOnly: $('audioOnly').checked,
@@ -1108,6 +1185,7 @@ async function enqueue(items) {
     writeSubs: $('writeSubs').checked,
     studyDoc: $('studyDoc').checked,
     outputDir: $('outputDir').value.trim() || undefined,
+    channel: channelRef,
   });
   const extras = [];
   if (!$('audioOnly').checked && $('alsoAudio').checked) extras.push('音频');
@@ -1130,7 +1208,9 @@ async function enqueue(items) {
   const q = await api.queue.list();
   state.queue = q.items || [];
   state.stats = q.stats || {};
+  lastDoneCount = state.queue.filter((x) => x.status === 'done' || x.status === 'skipped').length;
   renderQueue();
+  await loadRecentChannels();
 
   const info = await api.info();
   if (!info.isPackaged) {
