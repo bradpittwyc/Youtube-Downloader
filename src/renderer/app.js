@@ -212,7 +212,7 @@ function rowHtml(it) {
 
   return `<div class="row ${selected ? 'selected' : ''}" data-id="${esc(it.id)}">
     <input type="checkbox" ${selected ? 'checked' : ''} data-check="${esc(it.id)}" />
-    <img class="row-thumb" loading="lazy" src="${esc(it.thumbnail || '')}" onerror="this.style.visibility='hidden'" />
+    <img class="row-thumb" loading="lazy" src="${esc(it.thumbnail || '')}" />
     <div class="row-main">
       <div class="row-title">${esc(it.title)}${badges.length ? ' ' + badges.join(' ') : ''}</div>
       <div class="row-meta">${meta.join('')}</div>
@@ -348,7 +348,7 @@ function renderQueue() {
       el.className = 'q-item';
       el.setAttribute('data-key', q.key);
       el.innerHTML = `<div class="q-top">
-          <img class="q-thumb" loading="lazy" onerror="this.style.visibility='hidden'" />
+          <img class="q-thumb" loading="lazy" />
           <div class="q-title"></div>
           <div class="q-actions"></div>
         </div>
@@ -545,6 +545,7 @@ async function loadSettingsToForm() {
   $('setConcurrency').value = s.concurrency || 2;
   $('setAutoRetry').value = s.autoRetry == null ? 3 : s.autoRetry;
   $('setFilename').value = s.filenameTemplate || '';
+  $('setOrganizeInFolder').checked = s.organizeInFolder !== false;
   $('setRateLimit').value = s.rateLimit || '';
   $('setProxy').value = s.proxy || '';
   $('setCookieFile').value = s.cookieFile || '';
@@ -665,6 +666,15 @@ function bind() {
       if (state.renderedCount < filteredItems().length) renderList(false);
     }
   });
+
+  // 缩略图加载失败时隐藏掉，避免显示成破图。
+  // 注意：CSP 是 script-src 'self'，行内 onerror="..." 会被拦截（实测报过 CSP 违规），
+  // 所以改用事件委托；error 事件不冒泡，必须用捕获阶段监听。
+  const hideBrokenImage = (e) => {
+    if (e.target && e.target.tagName === 'IMG') e.target.style.visibility = 'hidden';
+  };
+  $('list').addEventListener('error', hideBrokenImage, true);
+  $('queueList').addEventListener('error', hideBrokenImage, true);
 
   $('btnLoadMore').addEventListener('click', () => renderList(false));
 
@@ -863,6 +873,7 @@ function bind() {
       concurrency: Number($('setConcurrency').value) || 2,
       autoRetry: Number($('setAutoRetry').value) || 0,
       filenameTemplate: $('setFilename').value.trim() || '%(title)s [%(id)s].%(ext)s',
+      organizeInFolder: $('setOrganizeInFolder').checked,
       rateLimit: $('setRateLimit').value.trim(),
       proxy: $('setProxy').value.trim(),
       cookieFile: $('setCookieFile').value.trim(),

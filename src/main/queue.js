@@ -60,6 +60,24 @@ const POSTPROCESS_LABEL = {
 
 const TERMINAL = new Set(['done', 'error', 'canceled', 'skipped']);
 
+/**
+ * 把一个文件名模板变成「文件夹/文件名」的嵌套模板。
+ * 例：%(title)s [%(upload_date>%Y-%m-%d)s].%(ext)s
+ *   → %(title)s [%(upload_date>%Y-%m-%d)s]/%(title)s [%(upload_date>%Y-%m-%d)s].%(ext)s
+ * yt-dlp 的 -o 模板里带 / 就会自动创建目录，因此视频、字幕、ASS、Word 会一起落进同一个文件夹。
+ */
+function effectiveTemplate(opts) {
+  const t = String((opts && opts.filenameTemplate) || '%(title)s [%(upload_date>%Y-%m-%d)s].%(ext)s');
+  if (opts && opts.organizeInFolder === false) return t;
+  // 用去掉扩展名后的模板作为文件夹名
+  const folder = t.replace(/\.%\(ext\)s\s*$/i, '');
+  if (!folder || folder === t) {
+    // 模板里没有 %(ext)s（yt-dlp 会自己补扩展名），退化为「模板目录/模板」
+    return `${t}/%(title)s.%(ext)s`;
+  }
+  return `${folder}/${t}`;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -273,6 +291,7 @@ class DownloadQueue extends EventEmitter {
       embedSubs: !!settings.embedSubs,
       outputDir: batchOpts.outputDir || settings.outputDir,
       filenameTemplate: settings.filenameTemplate,
+      organizeInFolder: settings.organizeInFolder !== false,
       skipDownloaded: settings.skipDownloaded !== false,
       rateLimit: settings.rateLimit || '',
       proxy: settings.proxy || '',
@@ -452,7 +471,7 @@ class DownloadQueue extends EventEmitter {
       '-P',
       o.outputDir,
       '-o',
-      o.filenameTemplate || '%(title)s [%(id)s].%(ext)s',
+      effectiveTemplate(o),
     ];
 
     if (o.skipDownloaded) a.push('--download-archive', paths.archiveFile());
@@ -753,7 +772,7 @@ class DownloadQueue extends EventEmitter {
       '-P',
       item.opts.outputDir,
       '-o',
-      item.opts.filenameTemplate || '%(title)s [%(upload_date>%Y-%m-%d)s].%(ext)s',
+      effectiveTemplate(item.opts),
     ]);
     // YouTube 绝大多数视频只有「自动生成字幕」，不开这个会出现「明明有字幕却一个都没下」
     if (item.opts.writeAutoSubs !== false) args.push('--write-auto-subs');
@@ -1069,4 +1088,5 @@ module.exports = {
   POSTPROCESS_LABEL,
   fmtUploadDate,
   uploadDateFromPath,
+  effectiveTemplate,
 };

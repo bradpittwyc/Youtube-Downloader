@@ -1,5 +1,39 @@
 # 更新日志
 
+## v1.3.0 — 每个视频单独一个文件夹（2026-09-11）
+
+下载时自动建一个**以命名模板渲染结果命名**的文件夹，该视频的所有产物都放进去：
+
+```
+F:\YouTube下载\World’s Largest Tennis Match [2026-08-23]\
+  ├ World’s Largest Tennis Match [2026-08-23].mp4
+  ├ World’s Largest Tennis Match [2026-08-23].mp3
+  ├ World’s Largest Tennis Match [2026-08-23].en.srt
+  ├ World’s Largest Tennis Match [2026-08-23].zh-en.ass
+  └ World’s Largest Tennis Match [2026-08-23].学习文档.docx
+```
+
+### 实现方式
+
+把文件名模板拼成**嵌套模板**交给 yt-dlp 的 `-o`——模板里带 `/` 时 yt-dlp 会自动创建目录：
+
+```
+%(title)s [%(upload_date>%Y-%m-%d)s].%(ext)s
+  → %(title)s [%(upload_date>%Y-%m-%d)s]/%(title)s [%(upload_date>%Y-%m-%d)s].%(ext)s
+```
+
+关键点是**视频、字幕、ASS、Word 必须用同一个模板**，否则会散落在不同层级。
+字幕步骤单独跑一次 yt-dlp，所以那处也要用转换后的模板；ASS 与 Word 的路径由视频路径推导，自然落在同一目录。
+
+模板里没有 `%(ext)s` 时退化为「模板目录/%(title)s.%(ext)s」；设置里可关闭该行为（勾选项默认开启）。
+
+### 说明
+
+- 文件夹名与文件名**同名**（都来自模板），这样单独把文件拷出去也自带标识信息
+- 旧版本下载的平铺文件**不会被自动移动**；如需整理可手动归入文件夹，或等后续版本加一个「整理到文件夹」的功能
+
+---
+
 ## v1.2.0 — 中英不同色 ASS 双语字幕（2026-09-11）
 
 生成 `标题 [日期].zh-en.ass`，**中英分别设色 + 黑描边**，播放器（PotPlayer / VLC / MPV）直接加载。

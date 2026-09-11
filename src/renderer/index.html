@@ -223,6 +223,11 @@
             <label>文件名模板（yt-dlp 语法）</label>
             <input id="setFilename" type="text" spellcheck="false" />
             <small class="muted">默认 %(title)s [%(upload_date&gt;%Y-%m-%d)s].%(ext)s → 标题 + 上传日期，例如 <code>我的视频 [2026-08-23].mp4</code></small>
+            <label class="check" style="margin-top: 6px"
+              ><input type="checkbox" id="setOrganizeInFolder" /><span
+                >每个视频单独建一个文件夹（文件夹名用上面的模板，该视频的视频/音频/字幕/文档全部放进去）</span
+              ></label
+            >
           </div>
 
           <div class="setting-row">

@@ -72,6 +72,11 @@ const DEFAULTS = {
   subFormat: 'srt',
   embedSubs: false,
   filenameTemplate: DEFAULT_FILENAME_TEMPLATE,
+  /**
+   * 每个视频单独建一个文件夹（文件夹名 = 命名模板渲染结果），
+   * 该视频的视频/音频/字幕/ASS/学习文档全部放进去，避免下载目录被大量文件铺满。
+   */
+  organizeInFolder: true,
   skipDownloaded: true,
   rateLimit: '', // 例如 '2M'，空 = 不限速
   proxy: '',
