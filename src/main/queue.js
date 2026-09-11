@@ -11,6 +11,7 @@ const { EventEmitter } = require('events');
 const ytdlp = require('./ytdlp');
 const paths = require('./paths');
 const settingsStore = require('./settings');
+const study = require('./study');
 
 /**
  * 分辨率上限（只限制高度，具体编码由编码策略决定）
@@ -100,6 +101,8 @@ class DownloadQueue extends EventEmitter {
     this.active = new Map();
     this._persistTimer = null;
     this._emitTimer = null;
+    /** 本次运行累计的学习文档费用（元），仅用于界面提示 */
+    this.studyCostTotal = 0;
   }
 
   // ---------- 持久化 ----------
@@ -197,6 +200,14 @@ class DownloadQueue extends EventEmitter {
         subCount: (it.subPaths || []).length,
         subError: it.subError || '',
         fetchingSubs: !!it.fetchingSubs,
+        studyDocPath: it.studyDocPath || '',
+        biSrtPath: it.biSrtPath || '',
+        studyError: it.studyError || '',
+        studySummary: it.studySummary || '',
+        studyStage: it.studyStage || '',
+        studyCost: it.studyCost || 0,
+        studyFromCache: !!it.studyFromCache,
+        studying: !!it.studying,
         error: it.error || '',
         attempts: it.attempts || 0,
         interrupted: !!it.interrupted,
@@ -215,6 +226,7 @@ class DownloadQueue extends EventEmitter {
     }
     s.active = this.active.size;
     s.concurrency = settingsStore.load().concurrency;
+    s.studyCostTotal = this.studyCostTotal || 0;
     return s;
   }
 
@@ -235,6 +247,8 @@ class DownloadQueue extends EventEmitter {
         batchOpts.alsoAudio != null ? !!batchOpts.alsoAudio : settings.alsoAudio !== false,
       writeSubs:
         batchOpts.writeSubs != null ? !!batchOpts.writeSubs : settings.writeSubs !== false,
+      studyDoc:
+        batchOpts.studyDoc != null ? !!batchOpts.studyDoc : settings.studyDoc !== false,
       writeAutoSubs: settings.writeAutoSubs !== false,
       subLangs: batchOpts.subLangs || settings.subLangs || 'en',
       subFormat: settings.subFormat || 'srt',
@@ -295,6 +309,11 @@ class DownloadQueue extends EventEmitter {
         audioError: '',
         subPaths: [],
         subError: '',
+        studyDocPath: '',
+        biSrtPath: '',
+        studyError: '',
+        studySummary: '',
+        studyCost: 0,
         error: '',
         attempts: 0,
         addedAt: nowIso(),
@@ -560,6 +579,12 @@ class DownloadQueue extends EventEmitter {
         } catch (err) {
           console.error('[queue] fetch subtitles unexpected:', err && err.message);
         }
+        // 字幕就绪后自动生成中英对照学习文档（调用大模型，失败不影响视频/音频/字幕）
+        try {
+          await this._generateStudy(item);
+        } catch (err) {
+          console.error('[queue] study doc unexpected:', err && err.message);
+        }
       })();
       return;
     }
@@ -768,12 +793,104 @@ class DownloadQueue extends EventEmitter {
     }
   }
 
+  /**
+   * 调用大模型生成中英对照学习文档。
+   * 依赖英文字幕（没有字幕就没法做），失败只记 studyError，绝不影响已下好的成品。
+   * 费用护栏默认全部关闭，但代码留着，用户想用时在设置里打开即可。
+   */
+  async _generateStudy(item) {
+    const settings = settingsStore.load();
+    // 以入队时记录的选择为准（老任务没有该字段则回退到当前设置）
+    const wantStudy =
+      item.opts && item.opts.studyDoc != null ? item.opts.studyDoc : settings.studyDoc !== false;
+    if (!wantStudy) return;
+
+    const srt = (item.subPaths || []).find((p) => /\.srt$/i.test(p)) || '';
+    if (!srt || !fs.existsSync(srt)) {
+      item.studyError = '没有英文字幕，无法生成学习文档';
+      this.changed(true);
+      return;
+    }
+
+    const durationSec = Number(item.duration) || 0;
+    const est = study.estimateFor(srt, settings, durationSec * 1000);
+    item.studyEstimate = { costCny: est.costCny, inputTokens: est.inputTokens, outputTokens: est.outputTokens };
+
+    // 护栏（默认关闭：0 表示不限制）
+    const minDur = Number(settings.studyMinDurationSec) || 0;
+    if (minDur > 0 && durationSec > 0 && durationSec < minDur) {
+      item.studyError = `时长不足 ${Math.round(minDur / 60)} 分钟，已跳过自动生成`;
+      this.changed(true);
+      return;
+    }
+    const maxPerVideo = Number(settings.studyMaxCostPerVideo) || 0;
+    if (maxPerVideo > 0 && est.costCny > maxPerVideo) {
+      item.studyError = `预估费用 ￥${est.costCny.toFixed(2)} 超过单视频上限，已跳过（可手动生成）`;
+      this.changed(true);
+      return;
+    }
+    const maxPerBatch = Number(settings.studyMaxCostPerBatch) || 0;
+    if (maxPerBatch > 0 && this.studyCostTotal >= maxPerBatch) {
+      item.studyError = `本批累计费用已达上限 ￥${maxPerBatch.toFixed(2)}，已跳过（可手动生成）`;
+      this.changed(true);
+      return;
+    }
+
+    item.studying = true;
+    item.stage = '已完成 · 生成学习文档…';
+    this.changed(true);
+
+    try {
+      const res = await study.generateForVideo({
+        srtPath: srt,
+        videoPath: item.filePath,
+        videoId: item.id,
+        meta: {
+          title: item.title,
+          channel: item.channel,
+          durationMs: durationSec * 1000,
+          uploadDate: '',
+          url: item.url,
+        },
+        settings,
+        onProgress: (p) => {
+          item.studyStage =
+            p.phase === 'translate'
+              ? `翻译 ${p.done}/${p.total} 段`
+              : p.phase === 'structure'
+              ? '分析内容结构'
+              : p.phase === 'write'
+              ? p.label || '排版文档'
+              : p.label || p.phase;
+          item.stage = `已完成 · ${item.studyStage}`;
+          this.changed();
+        },
+      });
+      item.studyDocPath = res.paths.docx || '';
+      item.biSrtPath = res.paths.bilingualSrt || '';
+      item.studyFromCache = !!res.fromCache;
+      item.studySummary = res.summary;
+      item.studyError = '';
+      // 命中缓存不产生费用
+      item.studyCost = res.fromCache ? 0 : est.costCny;
+      if (!res.fromCache) this.studyCostTotal = (this.studyCostTotal || 0) + est.costCny;
+    } catch (err) {
+      item.studyError = String((err && err.message) || err).slice(0, 300);
+      console.error('[queue] study doc failed:', item.studyError);
+    } finally {
+      item.studying = false;
+      item.stage = this._finalStage(item);
+      this.changed(true);
+    }
+  }
+
   /** 根据实际产出决定「已完成」的措辞 */
   _finalStage(item) {
     const bits = [];
     if (item.filePath) bits.push('视频');
     if (item.audioPath) bits.push('音频');
     if ((item.subPaths || []).length) bits.push(`${item.subPaths.length} 个字幕`);
+    if (item.studyDocPath) bits.push('学习文档');
     return bits.length > 1 ? `已完成（${bits.join(' + ')}）` : '已完成';
   }
 

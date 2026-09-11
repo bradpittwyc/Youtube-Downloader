@@ -12,6 +12,9 @@ const paths = require('./paths');
 const settingsStore = require('./settings');
 const ytdlp = require('./ytdlp');
 const channel = require('./channel');
+const study = require('./study');
+const studyLlm = require('./study/llm');
+const secret = require('./study/secret');
 const { DownloadQueue } = require('./queue');
 
 const queue = new DownloadQueue();
@@ -182,11 +185,125 @@ function registerIpc() {
     }
   });
 
-  ipcMain.handle('settings:get', () => settingsStore.load());
+  ipcMain.handle('settings:get', () => {
+    const s = settingsStore.load();
+    // API Key 绝不明文回传给渲染进程，只回传「是否已设置」和打码串
+    const plain = secret.open(s.studyApiKey);
+    return Object.assign({}, s, {
+      studyApiKey: '',
+      studyApiKeySet: !!plain,
+      studyApiKeyMask: secret.mask(plain),
+      studyKeyEncrypted: secret.isSealed(s.studyApiKey),
+      studyCanEncrypt: secret.canEncrypt(),
+    });
+  });
+
   ipcMain.handle('settings:set', (_e, patch) => {
-    const s = settingsStore.save(patch || {});
+    const p = Object.assign({}, patch || {});
+    // 渲染层传上来的是明文 Key，这里加密后再落盘
+    if (typeof p.studyApiKey === 'string') {
+      if (!p.studyApiKey) {
+        delete p.studyApiKey; // 空串表示「不改动」
+      } else {
+        p.studyApiKey = secret.seal(p.studyApiKey);
+      }
+    }
+    if (p.studyApiKeyClear) {
+      p.studyApiKey = '';
+      delete p.studyApiKeyClear;
+    }
+    const s = settingsStore.save(p);
     queue.pump();
     return s;
+  });
+
+  // ---- 学习文档（大模型） ----
+  ipcMain.handle('study:test-connection', async (_e, override) => {
+    const base = settingsStore.load();
+    const merged = Object.assign({}, base, override || {});
+    const cfg = study.llmConfigFrom(merged);
+    if (!cfg.baseURL || !cfg.model) return { ok: false, error: '请先填写 Base URL 与模型名' };
+    if (!cfg.apiKey) return { ok: false, error: '请先填写 API Key' };
+    try {
+      const r = await studyLlm.testConnection(cfg);
+      return r;
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err).slice(0, 300) };
+    }
+  });
+
+  ipcMain.handle('study:estimate', async (_e, { srtPath, durationMs }) => {
+    try {
+      if (!srtPath || !fs.existsSync(srtPath)) return { ok: false, error: '字幕文件不存在' };
+      const s = settingsStore.load();
+      return { ok: true, estimate: study.estimateFor(srtPath, s, durationMs || 0) };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err).slice(0, 200) };
+    }
+  });
+
+  ipcMain.handle('study:generate', async (_e, { key, force }) => {
+    const item = queue.items.get(key);
+    if (!item) return { ok: false, error: '任务不存在' };
+    if (item.studying) return { ok: false, error: '该任务正在生成中' };
+    // 手动触发时忽略护栏，并且可以强制重新翻译
+    const srt = (item.subPaths || []).find((p) => /\.srt$/i.test(p)) || '';
+    if (!srt || !fs.existsSync(srt)) return { ok: false, error: '该任务没有英文字幕，无法生成' };
+    if (item.filePath && !fs.existsSync(item.filePath)) {
+      // 视频被删了也不影响，字幕还在就能生成
+    }
+    item.studying = true;
+    item.studyError = '';
+    item.stage = '已完成 · 生成学习文档…';
+    queue.changed(true);
+    try {
+      const settings = settingsStore.load();
+      const res = await study.generateForVideo({
+        srtPath: srt,
+        videoPath: item.filePath,
+        videoId: item.id,
+        force: !!force,
+        meta: {
+          title: item.title,
+          channel: item.channel,
+          durationMs: (Number(item.duration) || 0) * 1000,
+          uploadDate: '',
+          url: item.url,
+        },
+        settings,
+        onProgress: (p) => {
+          item.studyStage =
+            p.phase === 'translate' ? `翻译 ${p.done}/${p.total} 段` : p.label || p.phase;
+          item.stage = `已完成 · ${item.studyStage}`;
+          queue.changed();
+        },
+      });
+      item.studyDocPath = res.paths.docx || '';
+      item.biSrtPath = res.paths.bilingualSrt || '';
+      item.studyFromCache = !!res.fromCache;
+      item.studySummary = res.summary;
+      item.studyCost = 0;
+      if (force) study.clearCache(item.id, srt);
+      return { ok: true, paths: res.paths, summary: res.summary, fromCache: res.fromCache };
+    } catch (err) {
+      item.studyError = String((err && err.message) || err).slice(0, 300);
+      return { ok: false, error: item.studyError };
+    } finally {
+      item.studying = false;
+      item.stage = queue._finalStage(item);
+      queue.changed(true);
+    }
+  });
+
+  ipcMain.handle('study:key-info', () => {
+    const s = settingsStore.load();
+    const plain = secret.open(s.studyApiKey);
+    return {
+      set: !!plain,
+      mask: secret.mask(plain),
+      encrypted: secret.isSealed(s.studyApiKey),
+      canEncrypt: secret.canEncrypt(),
+    };
   });
 
   ipcMain.handle('dialog:pickFolder', async (_e, current) => {

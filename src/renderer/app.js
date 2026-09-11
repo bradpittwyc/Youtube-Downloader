@@ -348,6 +348,7 @@ function renderQueue() {
     }
     if (q.extractingAudio) stageText = '⏳ ' + stageText;
     if (q.fetchingSubs) stageText = '⏳ ' + stageText;
+    if (q.studying) stageText = `⏳ ${q.studyStage || '生成学习文档'}…`;
     stage.textContent = stageText;
     stage.title = stageText;
 
@@ -372,6 +373,10 @@ function renderQueue() {
       errEl.classList.remove('hidden');
       errEl.classList.add('warn');
       errEl.textContent = '字幕获取失败（视频不受影响）：' + q.subError;
+    } else if (q.studyError) {
+      errEl.classList.remove('hidden');
+      errEl.classList.add('warn');
+      errEl.textContent = '学习文档：' + q.studyError;
     } else {
       errEl.classList.add('hidden');
     }
@@ -386,6 +391,13 @@ function renderQueue() {
     if (q.status === 'done' || q.status === 'skipped') buttons.push(['open', '打开', '打开所在文件夹']);
     if (q.audioPath) buttons.push(['openAudio', '音频', '定位导出的音频文件']);
     if (q.subCount > 0) buttons.push(['openSubs', `字幕${q.subCount}`, `定位字幕文件（共 ${q.subCount} 个）`]);
+    if (q.biSrtPath) buttons.push(['openBiSrt', '双语', '定位中英双语字幕']);
+    if (q.studyDocPath) {
+      buttons.push(['openDoc', '文档', '打开学习文档']);
+      buttons.push(['redoDoc', '重做', '重新生成（走翻译缓存；如需重新翻译请按住 Ctrl 点击）']);
+    } else if (q.subCount > 0) {
+      buttons.push(['redoDoc', '生成文档', '调用大模型生成中英对照学习文档']);
+    }
     buttons.push(['remove', '✕', '从队列移除']);
     const sig = buttons.map((b) => b[0] + b[1]).join(',');
     if (acts.getAttribute('data-sig') !== sig) {
@@ -397,6 +409,9 @@ function renderQueue() {
     el.setAttribute('data-path', q.filePath || '');
     el.setAttribute('data-audio', q.audioPath || '');
     el.setAttribute('data-subs', (q.subPaths && q.subPaths[0]) || '');
+    el.setAttribute('data-doc', q.studyDocPath || '');
+    el.setAttribute('data-bisrt', q.biSrtPath || '');
+    el.setAttribute('data-key', q.key);
   }
 
   for (const [key, el] of Array.from(queueNodes.entries())) {
@@ -414,7 +429,10 @@ function renderQueue() {
     `完成 <b>${(s.done || 0) + (s.skipped || 0)}</b>`,
     `失败 <b>${s.error || 0}</b>`,
     `并发 <b>${s.concurrency || 2}</b>`,
-  ].join('&nbsp;&nbsp;');
+    s.studyCostTotal > 0 ? `文档花费 <b>￥${s.studyCostTotal.toFixed(2)}</b>` : '',
+  ]
+    .filter(Boolean)
+    .join('&nbsp;&nbsp;');
   $('queueBadge').textContent = (s.downloading || 0) + (s.queued || 0);
 }
 
@@ -515,12 +533,38 @@ async function loadSettingsToForm() {
   $('setSubLangs').value = s.subLangs || 'en';
   $('setSubFormat').value = ['vtt', 'ass'].includes(s.subFormat) ? s.subFormat : 'srt';
 
+  // 学习文档
+  $('setStudyDoc').checked = s.studyDoc !== false;
+  $('setStudyPureEn').checked = s.studyIncludePureEnglish !== false;
+  $('setStudyVocab').checked = s.studyIncludeVocab !== false;
+  $('setStudyTimecode').checked = s.studyTimecode !== false;
+  $('setStudyBiSrt').checked = s.studyBilingualSrt !== false;
+  $('setStudyBase').value = s.studyBaseURL || '';
+  $('setStudyModel').value = s.studyModel || '';
+  $('setStudyConcurrency').value = s.studyConcurrency || 3;
+  $('setStudyMaxSeg').value = s.studyMaxSegCues || 45;
+  $('setStudyPriceIn').value = s.studyPriceIn != null ? s.studyPriceIn : 2;
+  $('setStudyPriceOut').value = s.studyPriceOut != null ? s.studyPriceOut : 8;
+  $('setStudyMinDur').value = s.studyMinDurationSec || 0;
+  $('setStudyMaxVideo').value = s.studyMaxCostPerVideo || 0;
+  $('setStudyMaxBatch').value = s.studyMaxCostPerBatch || 0;
+  $('setStudyKey').value = '';
+  const keyEl = $('setStudyKey');
+  if (s.studyApiKeySet) {
+    keyEl.placeholder = `${s.studyApiKeyMask || '****'}（已保存，留空不修改）`;
+    $('llmStatus').textContent = s.studyKeyEncrypted ? '已配置（已加密存储）' : '已配置（明文存储）';
+  } else {
+    keyEl.placeholder = '在此粘贴 API Key';
+    $('llmStatus').textContent = '未配置';
+  }
+
   // 主界面同步
   $('outputDir').value = s.outputDir || '';
   $('qualitySelect').value = s.quality || 'best';
   $('audioOnly').checked = !!s.audioOnly;
   $('alsoAudio').checked = s.alsoAudio !== false;
   $('writeSubs').checked = s.writeSubs !== false;
+  $('studyDoc').checked = s.studyDoc !== false;
   syncAlsoAudioEnabled();
 }
 
@@ -638,6 +682,35 @@ function bind() {
   });
   $('alsoAudio').addEventListener('change', (e) => api.settings.set({ alsoAudio: e.target.checked }));
   $('writeSubs').addEventListener('change', (e) => api.settings.set({ writeSubs: e.target.checked }));
+  $('studyDoc').addEventListener('change', (e) => api.settings.set({ studyDoc: e.target.checked }));
+
+  // 学习文档：测试连接 / 清除 Key
+  $('btnTestLLM').addEventListener('click', async () => {
+    const st = $('llmStatus');
+    st.textContent = '测试中…';
+    st.style.color = 'var(--info)';
+    const override = {
+      studyBaseURL: $('setStudyBase').value.trim(),
+      studyModel: $('setStudyModel').value.trim(),
+    };
+    const typed = $('setStudyKey').value.trim();
+    if (typed) override.studyApiKey = typed;
+    const r = await api.study.testConnection(override);
+    if (r.ok) {
+      st.textContent = `连接成功（${r.ms}ms）回复「${r.reply}」`;
+      st.style.color = 'var(--ok)';
+    } else {
+      st.textContent = `失败：${r.error}`;
+      st.style.color = 'var(--err)';
+    }
+  });
+
+  $('btnClearKey').addEventListener('click', async () => {
+    await api.settings.set({ studyApiKeyClear: true });
+    $('setStudyKey').value = '';
+    await loadSettingsToForm();
+    toast('已清除 API Key', 'ok');
+  });
   $('btnPickDir').addEventListener('click', async () => {
     const p = await api.dialog.pickFolder($('outputDir').value);
     if (p) {
@@ -670,6 +743,27 @@ function bind() {
       const p = el.getAttribute('data-subs');
       if (p) api.shell.showItem(p);
       else toast('没有找到字幕文件', 'warn');
+      return;
+    }
+    if (act === 'openBiSrt') {
+      const p = el.getAttribute('data-bisrt');
+      if (p) api.shell.showItem(p);
+      else toast('还没有生成双语字幕', 'warn');
+      return;
+    }
+    if (act === 'openDoc') {
+      const p = el.getAttribute('data-doc');
+      if (p) api.shell.openPath(p);
+      else toast('还没有生成学习文档', 'warn');
+      return;
+    }
+    if (act === 'redoDoc') {
+      const key = el.getAttribute('data-key');
+      const force = !!e.ctrlKey;
+      toast(force ? '正在重新翻译并生成（会调用大模型）…' : '正在生成学习文档…', 'ok', 2500);
+      const r = await api.study.generate(key, force);
+      if (r.ok) toast(r.fromCache ? '已用翻译缓存重新排版完成' : '学习文档生成完成', 'ok', 6000);
+      else toast('生成失败：' + r.error, 'err', 9000);
       return;
     }
     await api.queue.action(key, act);
@@ -726,7 +820,24 @@ function bind() {
       embedSubs: $('setEmbedSubs').checked,
       subLangs: $('setSubLangs').value.trim() || 'en',
       subFormat: $('setSubFormat').value,
+      studyDoc: $('setStudyDoc').checked,
+      studyIncludePureEnglish: $('setStudyPureEn').checked,
+      studyIncludeVocab: $('setStudyVocab').checked,
+      studyTimecode: $('setStudyTimecode').checked,
+      studyBilingualSrt: $('setStudyBiSrt').checked,
+      studyBaseURL: $('setStudyBase').value.trim(),
+      studyModel: $('setStudyModel').value.trim(),
+      studyConcurrency: Number($('setStudyConcurrency').value) || 3,
+      studyMaxSegCues: Number($('setStudyMaxSeg').value) || 45,
+      studyPriceIn: Number($('setStudyPriceIn').value) || 0,
+      studyPriceOut: Number($('setStudyPriceOut').value) || 0,
+      studyMinDurationSec: Number($('setStudyMinDur').value) || 0,
+      studyMaxCostPerVideo: Number($('setStudyMaxVideo').value) || 0,
+      studyMaxCostPerBatch: Number($('setStudyMaxBatch').value) || 0,
     };
+    // 只有用户真的输入了新 Key 才提交（留空表示保持原值）
+    const keyInput = $('setStudyKey').value.trim();
+    if (keyInput) patch.studyApiKey = keyInput;
     await api.settings.set(patch);
     await loadSettingsToForm();
     toast('设置已保存', 'ok');
@@ -777,11 +888,13 @@ async function enqueue(items) {
     audioOnly: $('audioOnly').checked,
     alsoAudio: $('alsoAudio').checked,
     writeSubs: $('writeSubs').checked,
+    studyDoc: $('studyDoc').checked,
     outputDir: $('outputDir').value.trim() || undefined,
   });
   const extras = [];
   if (!$('audioOnly').checked && $('alsoAudio').checked) extras.push('音频');
   if ($('writeSubs').checked) extras.push('字幕');
+  if ($('studyDoc').checked && $('writeSubs').checked) extras.push('学习文档');
   let msg = `已加入队列 ${res.added} 个`;
   if (res.skipped) msg += `，跳过已在队列中的 ${res.skipped} 个`;
   if (extras.length) msg += `（将同时下载${extras.join(' + ')}）`;

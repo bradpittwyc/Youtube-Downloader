@@ -47,6 +47,13 @@ contextBridge.exposeInMainWorld('api', {
     onChanged: (cb) => on('queue:changed', cb),
   },
 
+  study: {
+    testConnection: (override) => ipcRenderer.invoke('study:test-connection', override),
+    estimate: (payload) => ipcRenderer.invoke('study:estimate', payload),
+    generate: (key, force) => ipcRenderer.invoke('study:generate', { key, force }),
+    keyInfo: () => ipcRenderer.invoke('study:key-info'),
+  },
+
   shell: {
     openPath: (p) => ipcRenderer.invoke('shell:open-path', p),
     showItem: (p) => ipcRenderer.invoke('shell:show-item', p),

@@ -3,3 +3,5 @@ dist/
 releases/
 *.log
 .poc/
+tools/probe.config.json
+.probe/

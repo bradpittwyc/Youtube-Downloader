@@ -141,6 +141,11 @@
           <span>字幕</span>
         </label>
 
+        <label class="check" title="字幕下载完成后，调用大模型生成中英对照 Word 学习文档（会产生 API 费用）">
+          <input type="checkbox" id="studyDoc" checked />
+          <span>学习文档</span>
+        </label>
+
         <label class="field grow">
           <span>保存到</span>
           <input id="outputDir" type="text" spellcheck="false" />
@@ -235,6 +240,93 @@
               提示：<strong>原生语言</strong>字幕最可靠；英文视频请求 zh-Hans 这类<strong>自动翻译轨</strong>会被 YouTube
               限流（HTTP 429），因此默认不请求翻译轨；即使填了，拿不到也不影响视频本身。</small
             >
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="setting-row">
+            <label>学习文档（调用大模型生成中英对照 Word）</label>
+            <div class="checks">
+              <label class="check"><input type="checkbox" id="setStudyDoc" /><span>下载完成后自动生成</span></label>
+              <label class="check"><input type="checkbox" id="setStudyPureEn" /><span>附纯英文版</span></label>
+              <label class="check"><input type="checkbox" id="setStudyVocab" /><span>词汇总表</span></label>
+              <label class="check"><input type="checkbox" id="setStudyTimecode" /><span>段落时间码</span></label>
+              <label class="check"><input type="checkbox" id="setStudyBiSrt" /><span>生成中英双语 SRT</span></label>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <label>API 地址（OpenAI 兼容，DeepSeek / OpenAI / 通义 / Kimi / GLM / 本地 Ollama 均可）</label>
+            <input id="setStudyBase" type="text" spellcheck="false" placeholder="https://api.deepseek.com/v1" />
+          </div>
+
+          <div class="setting-row two-col">
+            <div>
+              <label>API Key</label>
+              <input id="setStudyKey" type="password" spellcheck="false" placeholder="留空表示不修改" />
+            </div>
+            <div>
+              <label>模型名</label>
+              <input id="setStudyModel" type="text" spellcheck="false" placeholder="deepseek-chat" />
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="inline">
+              <button id="btnTestLLM" class="btn tiny">测试连接</button>
+              <button id="btnClearKey" class="btn tiny">清除 Key</button>
+              <span id="llmStatus" class="muted">未测试</span>
+            </div>
+            <small class="muted"
+              >API Key 使用系统凭据加密（Windows DPAPI）后保存在本机，并<b>不会</b>回传到界面。留空即保持原值。</small
+            >
+          </div>
+
+          <div class="setting-row two-col">
+            <div>
+              <label>翻译并发数</label>
+              <input id="setStudyConcurrency" type="number" min="1" max="6" step="1" />
+            </div>
+            <div>
+              <label>单段最大条数</label>
+              <input id="setStudyMaxSeg" type="number" min="10" max="80" step="5" />
+            </div>
+          </div>
+
+          <div class="setting-row two-col">
+            <div>
+              <label>输入价格（元/百万 token）</label>
+              <input id="setStudyPriceIn" type="number" min="0" step="0.1" />
+            </div>
+            <div>
+              <label>输出价格（元/百万 token）</label>
+              <input id="setStudyPriceOut" type="number" min="0" step="0.1" />
+            </div>
+          </div>
+          <small class="muted">价格只用于在生成前显示费用预估，不影响实际调用。</small>
+
+          <div class="divider"></div>
+
+          <div class="setting-row">
+            <label>学习文档费用护栏（默认全部关闭，填 0 表示不限制）</label>
+            <div class="setting-row two-col">
+              <div>
+                <label>最短时长（秒）</label>
+                <input id="setStudyMinDur" type="number" min="0" step="60" />
+              </div>
+              <div>
+                <label>单视频费用上限（元）</label>
+                <input id="setStudyMaxVideo" type="number" min="0" step="0.5" />
+              </div>
+            </div>
+            <div class="setting-row two-col">
+              <div>
+                <label>本批累计费用上限（元）</label>
+                <input id="setStudyMaxBatch" type="number" min="0" step="1" />
+              </div>
+              <div></div>
+            </div>
+            <small class="muted">超出上限时只是跳过「自动生成」，仍可在队列里对单个任务手动生成。</small>
           </div>
 
           <div class="setting-row two-col">

@@ -83,6 +83,29 @@ const DEFAULTS = {
   ffmpegPath: '',
   autoRetry: 3,
   maxItemsPerChannel: 0, // 0 = 不限制
+
+  // ---------------- 学习文档（调用大模型） ----------------
+  /** 字幕下载完成后自动生成中英对照学习文档 */
+  studyDoc: true,
+  studyBaseURL: 'https://api.deepseek.com/v1',
+  /** 用 safeStorage 加密后的 Key（enc:v1: 前缀）；历史数据可能是明文 */
+  studyApiKey: '',
+  studyModel: 'deepseek-chat',
+  studyTemperature: 0.2,
+  studyConcurrency: 3,
+  studyMaxSegCues: 45,
+  studyIncludePureEnglish: true,
+  studyIncludeVocab: true,
+  studyTimecode: true,
+  /** 生成双语 SRT（中英双行） */
+  studyBilingualSrt: true,
+  /** 价格（元 / 百万 token），仅用于费用预估显示 */
+  studyPriceIn: 2,
+  studyPriceOut: 8,
+  /** 护栏：默认全部不启用（用户要求下完就自动生成） */
+  studyMinDurationSec: 0, // 0 = 不限制
+  studyMaxCostPerVideo: 0, // 0 = 不限制
+  studyMaxCostPerBatch: 0, // 0 = 不限制
 };
 
 let cache = null;

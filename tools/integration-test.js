@@ -664,6 +664,8 @@ async function testPartialStreamResume() {
 (async function main() {
   fs.rmSync(TMP, { recursive: true, force: true });
   fs.mkdirSync(DL, { recursive: true });
+  // 集成测试不触发大模型（学习文档由 tools/study-cli.js 单独验证）
+  settingsStore.save({ studyDoc: false });
   console.log(`临时目录: ${TMP}`);
   console.log(`模式: ${QUICK ? 'QUICK（单频道/少量条目，日常验证用）' : 'FULL（完整枚举，发版前用）'}`);
 
