@@ -701,9 +701,8 @@ async function doFetch(force) {
   const total = allItems().length;
   if (!total) {
     toast('没有识别到任何内容，可能该频道为空或链接有误', 'warn', 7000);
-  } else {
-    toast(`识别完成，共 ${total} 个内容`, 'ok');
   }
+  // 识别成功不再弹提示：上方状态栏已经在显示进度，列表也直接出来了，弹窗只是噪音
   const errs = (data.warnings || []).filter((w) => w.level === 'error');
   if (errs.length) toast(`有 ${errs.length} 个分类抓取失败，详情见列表上方提示`, 'warn', 7000);
 }
@@ -853,9 +852,7 @@ function bind() {
       return;
     }
     const url = btn.getAttribute('data-sc-url');
-    const name = btn.querySelector('.rc-name')?.textContent || url;
     $('urlInput').value = url;
-    toast(`切换到「${name}」（本次已抓取，直接复用）`, 'ok', 2500);
     doFetch(false);
   });
 
@@ -868,9 +865,7 @@ function bind() {
       return;
     }
     const url = btn.getAttribute('data-rc-url');
-    const name = btn.querySelector('.rc-name')?.textContent || url;
     $('urlInput').value = url;
-    toast(`正在抓取「${name}」的最新内容…`, 'ok', 3000);
     doFetch(false);
   });
   // 右键从列表移除
