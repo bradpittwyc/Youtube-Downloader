@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data: https://i.ytimg.com https://*.ytimg.com https://yt3.ggpht.com https://yt3.googleusercontent.com https://*.googleusercontent.com; style-src 'self' 'unsafe-inline'; script-src 'self';"
+    />
+    <title>YouTube 下载器</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <!-- ============ 顶栏 ============ -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark">▶</div>
+        <div class="brand-text">
+          <strong>YouTube 下载器</strong>
+          <span id="binStatus" class="bin-status">检查内核中…</span>
+        </div>
+      </div>
+
+      <div class="fetch-row">
+        <input
+          id="urlInput"
+          type="text"
+          spellcheck="false"
+          placeholder="粘贴博主主页链接，例如 https://www.youtube.com/@MrBeast（也可粘贴单个视频或播放列表链接）"
+        />
+        <button id="btnFetch" class="btn primary">识别</button>
+        <button id="btnCancelFetch" class="btn danger hidden">取消</button>
+        <button id="btnRefresh" class="btn ghost hidden" title="忽略缓存，重新抓取">重新抓取</button>
+      </div>
+
+      <div class="topbar-right">
+        <button id="btnQueueJump" class="btn ghost" title="跳到下载队列">队列 <span id="queueBadge">0</span></button>
+        <button id="btnSettings" class="btn ghost" title="设置">⚙ 设置</button>
+      </div>
+    </header>
+
+    <!-- ============ 主体 ============ -->
+    <main class="layout">
+      <!-- 左侧：频道内容 -->
+      <section class="pane content-pane">
+        <div id="fetchStatus" class="fetch-status hidden"></div>
+
+        <div id="emptyState" class="empty-state">
+          <div class="empty-icon">📺</div>
+          <h2>粘贴博主主页链接开始</h2>
+          <p>自动识别该频道的 <b>Videos / Shorts / Live 直播 / Podcasts</b> 全部内容，勾选后批量下载。</p>
+          <div class="hint-grid">
+            <div><code>@MrBeast</code><span>直接输入频道名</span></div>
+            <div><code>youtube.com/@MrBeast</code><span>频道主页</span></div>
+            <div><code>youtube.com/@x/videos</code><span>指定标签页</span></div>
+            <div><code>watch?v=...</code><span>单个视频</span></div>
+          </div>
+        </div>
+
+        <div id="channelView" class="hidden">
+          <div class="channel-head">
+            <img id="chAvatar" class="ch-avatar" alt="" />
+            <div class="ch-meta">
+              <h2 id="chTitle">—</h2>
+              <div class="ch-sub">
+                <span id="chFollowers"></span>
+                <span id="chTotal"></span>
+                <span id="chCacheInfo" class="cache-info"></span>
+              </div>
+            </div>
+          </div>
+
+          <div id="warnings" class="warnings"></div>
+
+          <div id="tabs" class="tabs"></div>
+
+          <div class="toolbar">
+            <input id="searchInput" type="text" placeholder="按标题筛选…" spellcheck="false" />
+            <select id="searchScope" class="mini-select">
+              <option value="current">当前分类</option>
+              <option value="all">全部分类</option>
+            </select>
+            <button id="btnSelectAll" class="btn tiny">全选</button>
+            <button id="btnSelectNone" class="btn tiny">清空</button>
+            <button id="btnSelectInvert" class="btn tiny">反选</button>
+            <button id="btnSelectUnselected" class="btn tiny">仅选未下载</button>
+            <span id="selCounter" class="sel-counter">已选 0 / 0</span>
+          </div>
+
+          <div id="list" class="list"></div>
+          <div id="listMore" class="list-more hidden">
+            <button id="btnLoadMore" class="btn ghost">加载更多…</button>
+            <span id="loadMoreInfo" class="muted"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- 右侧：下载队列 -->
+      <aside class="pane queue-pane" id="queuePane">
+        <div class="pane-head">
+          <h3>下载队列</h3>
+          <div class="queue-head-actions">
+            <button id="btnPauseAll" class="btn tiny" title="全部暂停">全部暂停</button>
+            <button id="btnResumeAll" class="btn tiny" title="全部继续">全部继续</button>
+            <button id="btnClearDone" class="btn tiny" title="清除已完成">清除已完成</button>
+          </div>
+        </div>
+        <div id="queueStats" class="queue-stats"></div>
+        <div id="queueList" class="queue-list"></div>
+        <div id="queueEmpty" class="queue-empty">队列为空<br /><span class="muted">勾选视频后点「开始下载」</span></div>
+      </aside>
+    </main>
+
+    <!-- ============ 底部下载条 ============ -->
+    <footer class="actionbar" id="actionBar">
+      <div class="action-group">
+        <label class="field">
+          <span>画质</span>
+          <select id="qualitySelect">
+            <option value="best">最佳画质</option>
+            <option value="2160">2160p (4K)</option>
+            <option value="1440">1440p (2K)</option>
+            <option value="1080">1080p</option>
+            <option value="720">720p</option>
+            <option value="480">480p</option>
+            <option value="360">360p</option>
+          </select>
+        </label>
+
+        <label class="check">
+          <input type="checkbox" id="audioOnly" />
+          <span>仅音频 MP3</span>
+        </label>
+
+        <label class="check" title="视频下载完成后再在同目录导出一份同名 MP3（本地转码，不重复下载）">
+          <input type="checkbox" id="alsoAudio" checked />
+          <span>同时下载音频</span>
+        </label>
+
+        <label class="check" title="同时下载字幕文件（YouTube 多数视频为自动生成字幕）">
+          <input type="checkbox" id="writeSubs" checked />
+          <span>字幕</span>
+        </label>
+
+        <label class="field grow">
+          <span>保存到</span>
+          <input id="outputDir" type="text" spellcheck="false" />
+          <button id="btnPickDir" class="btn tiny">浏览</button>
+        </label>
+      </div>
+
+      <div class="action-right">
+        <span id="actionSummary" class="muted">未选择任何视频</span>
+        <button id="btnDownload" class="btn primary big" disabled>开始下载</button>
+      </div>
+    </footer>
+
+    <!-- ============ 设置弹窗 ============ -->
+    <div id="settingsModal" class="modal hidden">
+      <div class="modal-card">
+        <div class="modal-head">
+          <h3>设置</h3>
+          <button id="btnCloseSettings" class="btn ghost">✕</button>
+        </div>
+
+        <div class="modal-body">
+          <div class="setting-row">
+            <label>默认保存目录</label>
+            <div class="inline">
+              <input id="setOutputDir" type="text" spellcheck="false" />
+              <button id="btnSetPickDir" class="btn tiny">浏览</button>
+            </div>
+          </div>
+
+          <div class="setting-row two-col">
+            <div>
+              <label>同时下载数</label>
+              <input id="setConcurrency" type="number" min="1" max="6" step="1" />
+            </div>
+            <div>
+              <label>失败自动重试次数</label>
+              <input id="setAutoRetry" type="number" min="0" max="10" step="1" />
+            </div>
+          </div>
+
+          <div class="setting-row two-col">
+            <div>
+              <label>视频编码策略（影响声音兼容性）</label>
+              <select id="setVideoCodec">
+                <option value="quality">画质优先：最佳编码 + AAC（推荐）</option>
+                <option value="compat">兼容优先：H.264 + AAC（剪辑软件/老设备）</option>
+              </select>
+            </div>
+            <div>
+              <label>音频格式</label>
+              <select id="setAudioFormat">
+                <option value="mp3">MP3</option>
+                <option value="m4a">M4A (AAC)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="setting-row checks">
+            <label class="check">
+              <input type="checkbox" id="setAlsoAudio" /><span>下载视频时同时导出同名音频文件</span>
+            </label>
+          </div>
+          <small class="muted"
+            >说明：无论选哪种策略，音频都会强制使用 AAC 封装进 MP4。若把 Opus 塞进 MP4，大多数播放器会「有画面没声音」。</small
+          >
+
+          <div class="setting-row">
+            <label>文件名模板（yt-dlp 语法）</label>
+            <input id="setFilename" type="text" spellcheck="false" />
+            <small class="muted">默认 %(title)s [%(upload_date&gt;%Y-%m-%d)s].%(ext)s → 标题 + 上传日期，例如 <code>我的视频 [2026-08-23].mp4</code></small>
+          </div>
+
+          <div class="setting-row">
+            <label>字幕</label>
+            <div class="checks">
+              <label class="check"><input type="checkbox" id="setWriteSubs" /><span>下载字幕</span></label>
+              <label class="check"><input type="checkbox" id="setWriteAutoSubs" /><span>包含自动生成字幕（多数视频只有这种）</span></label>
+              <label class="check"><input type="checkbox" id="setEmbedSubs" /><span>同时嵌入视频</span></label>
+            </div>
+            <div class="inline">
+              <input id="setSubLangs" type="text" spellcheck="false" placeholder="en" />
+              <select id="setSubFormat" class="mini-select">
+                <option value="srt">SRT（推荐）</option>
+                <option value="vtt">VTT</option>
+                <option value="ass">ASS</option>
+              </select>
+            </div>
+            <small class="muted"
+              >字幕语言用逗号分隔（默认 <code>en</code>），每个匹配到的语言各生成一个字幕文件（与视频同名）。<br />
+              格式说明：SRT 兼容性最好（播放器与剪辑软件通吃）；VTT 是网页格式，个别剪辑软件不认。<br />
+              提示：<strong>原生语言</strong>字幕最可靠；英文视频请求 zh-Hans 这类<strong>自动翻译轨</strong>会被 YouTube
+              限流（HTTP 429），因此默认不请求翻译轨；即使填了，拿不到也不影响视频本身。</small
+            >
+          </div>
+
+          <div class="setting-row two-col">
+            <div>
+              <label>限速（留空不限速）</label>
+              <input id="setRateLimit" type="text" placeholder="例如 2M" spellcheck="false" />
+            </div>
+            <div>
+              <label>代理（可选）</label>
+              <input id="setProxy" type="text" placeholder="http://127.0.0.1:7890" spellcheck="false" />
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <label>Cookies 文件（会员 / 年龄限制 / 防机器人验证）</label>
+            <div class="inline">
+              <input id="setCookieFile" type="text" placeholder="cookies.txt" spellcheck="false" />
+              <button id="btnPickCookie" class="btn tiny">选择</button>
+              <button id="btnClearCookie" class="btn tiny">清除</button>
+            </div>
+          </div>
+
+          <div class="setting-row checks">
+            <label class="check"><input type="checkbox" id="setSkipDownloaded" /><span>跳过已下载过的视频</span></label>
+            <label class="check"><input type="checkbox" id="setEmbedMeta" /><span>写入元数据</span></label>
+            <label class="check"><input type="checkbox" id="setEmbedThumb" /><span>音频嵌入封面</span></label>
+            <label class="check">
+              <input type="checkbox" id="setLiveFromStart" /><span>直播从头录制（需该直播支持回看）</span>
+            </label>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="setting-row">
+            <label>内核状态（yt-dlp / ffmpeg）</label>
+            <pre id="kernelInfo" class="kernel-info">检查中…</pre>
+            <div class="inline">
+              <button id="btnUpdateKernel" class="btn tiny">一键更新 yt-dlp</button>
+              <button id="btnResetKernel" class="btn tiny">恢复内置版本</button>
+              <button id="btnOpenData" class="btn tiny">打开数据目录</button>
+            </div>
+            <pre id="updateLog" class="update-log hidden"></pre>
+          </div>
+        </div>
+
+        <div class="modal-foot">
+          <button id="btnSaveSettings" class="btn primary">保存设置</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toasts" class="toasts"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
