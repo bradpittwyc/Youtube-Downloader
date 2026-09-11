@@ -159,14 +159,43 @@ function collectSubtitleFiles(videoPath) {
   try {
     const dir = path.dirname(videoPath);
     const base = path.basename(videoPath, path.extname(videoPath));
+    const stripExt = (f) => f.replace(/\.[^.]+$/, '');
     return fs
       .readdirSync(dir)
-      .filter((f) => f.startsWith(base + '.') && SUB_EXT.test(f))
+      .filter((f) => {
+        if (!SUB_EXT.test(f)) return false;
+        // 正常情况：字幕名 = 视频名 + .en / .zh-Hans 等
+        if (f.startsWith(base + '.')) return true;
+        // 兼容 --trim-filenames 造成的截断：
+        // 视频与字幕的扩展名不一样长（.mp4 vs .en.srt），yt-dlp 会截成不同长度，
+        // 于是「视频名 + .」匹配不上字幕名——字幕明明已经下好躺在同一个文件夹里，
+        // 却被判定为「没有英文字幕」，学习文档也就生成不了（实测踩过）。
+        // 截断只砍尾部，所以两者必然互为前缀关系（较短者是较长者的开头）。
+        const fb = stripExt(f);
+        const shorter = base.length <= fb.length ? base : fb;
+        const longer = base.length <= fb.length ? fb : base;
+        // 阈值 24：太短容易误配同目录下名字相近的其它视频
+        return shorter.length >= 24 && longer.startsWith(shorter);
+      })
       .map((f) => path.join(dir, f))
       .sort();
   } catch (_) {
     return [];
   }
+}
+
+/**
+ * 重新扫描磁盘上的字幕文件并更新 item.subPaths。
+ * 用于修复历史任务（当时因为截断匹配失败而漏掉了字幕），
+ * 这样点「重做」就能直接生成学习文档，不必重新下载。
+ */
+function refreshSubPaths(item) {
+  if (!item) return [];
+  if (item.filePath && fs.existsSync(item.filePath)) {
+    const found = collectSubtitleFiles(item.filePath);
+    if (found.length) item.subPaths = found;
+  }
+  return item.subPaths || [];
 }
 
 function num(v) {
@@ -570,7 +599,9 @@ class DownloadQueue extends EventEmitter {
       '--no-overwrites',
       '--windows-filenames',
       '--trim-filenames',
-      '180',
+      // 上限比 Windows 的 260 留足余量。之前是 180，在「博主母文件夹/视频文件夹/文件」
+      // 三层结构下很容易触发截断，把文件名砍成 "[2026-09-" 这种半截样子。
+      '220',
       '-P',
       o.outputDir,
       '-o',
@@ -981,7 +1012,9 @@ class DownloadQueue extends EventEmitter {
       item.opts && item.opts.studyDoc != null ? item.opts.studyDoc : settings.studyDoc !== false;
     if (!wantStudy) return;
 
-    const srt = (item.subPaths || []).find((p) => /\.srt$/i.test(p)) || '';
+    // 先重新扫一遍磁盘：老任务可能因为文件名截断漏记了字幕，
+    // 但字幕其实就在视频旁边，重扫即可直接用上，不必重新下载
+    const srt = refreshSubPaths(item).find((p) => /\.srt$/i.test(p)) || '';
     if (!srt || !fs.existsSync(srt)) {
       item.studyError = '没有英文字幕，无法生成学习文档';
       this.changed(true);
@@ -1232,4 +1265,6 @@ module.exports = {
   effectiveTemplate,
   channelFolderOf,
   sanitizeFolderName,
+  collectSubtitleFiles,
+  refreshSubPaths,
 };

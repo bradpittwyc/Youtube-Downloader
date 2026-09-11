@@ -249,7 +249,9 @@ function registerIpc() {
     if (!item) return { ok: false, error: '任务不存在' };
     if (item.studying) return { ok: false, error: '该任务正在生成中' };
     // 手动触发时忽略护栏，并且可以强制重新翻译
-    const srt = (item.subPaths || []).find((p) => /\.srt$/i.test(p)) || '';
+    // 先重新扫一遍磁盘：老任务可能因为文件名截断漏记了字幕，
+    // 但字幕其实就在视频旁边，重扫即可直接生成，不必重新下载
+    const srt = queueMod.refreshSubPaths(item).find((p) => /\.srt$/i.test(p)) || '';
     if (!srt || !fs.existsSync(srt)) return { ok: false, error: '该任务没有英文字幕，无法生成' };
     if (item.filePath && !fs.existsSync(item.filePath)) {
       // 视频被删了也不影响，字幕还在就能生成
