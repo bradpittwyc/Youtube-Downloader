@@ -370,6 +370,21 @@ input::placeholder {
   padding: 6px 8px;
   font-size: 12px;
 }
+/* 工具栏里的复选框（显示过滤器） */
+.toolbar-check {
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+  white-space: nowrap;
+}
+.toolbar-check:hover {
+  border-color: #3c4455;
+}
+.toolbar-check:has(input:checked) {
+  border-color: var(--accent);
+  color: var(--text);
+}
 .sel-counter {
   margin-left: auto;
   font-size: 12px;

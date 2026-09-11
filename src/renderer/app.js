@@ -34,6 +34,8 @@ const state = {
   activeTab: 'all',
   search: '',
   searchScope: 'current',
+  /** 只显示还没下载过的视频（显示过滤器，只影响列表可见性，不影响勾选） */
+  showOnlyUndownloaded: false,
   selected: new Set(),
   renderedCount: 0,
   queue: [],
@@ -41,6 +43,16 @@ const state = {
   settings: null,
   fetching: false,
 };
+
+/** 已下载完成的视频 id 集合（done / skipped） */
+function doneKeys() {
+  return new Set(
+    state.queue.filter((q) => q.status === 'done' || q.status === 'skipped').map((q) => q.key)
+  );
+}
+
+/** 「已下载集合」的签名，用来判断是否需要因为下载完成而刷新列表 */
+let doneSig = '';
 
 const $ = (id) => document.getElementById(id);
 
@@ -127,8 +139,13 @@ function currentTabItems() {
 function filteredItems() {
   const base = state.searchScope === 'all' ? allItems() : currentTabItems();
   const q = state.search.trim().toLowerCase();
-  if (!q) return base;
-  return base.filter((it) => String(it.title || '').toLowerCase().includes(q));
+  let out = base;
+  if (q) out = out.filter((it) => String(it.title || '').toLowerCase().includes(q));
+  if (state.showOnlyUndownloaded) {
+    const done = doneKeys();
+    out = out.filter((it) => !done.has(it.id));
+  }
+  return out;
 }
 
 function tabsToShow() {
@@ -232,6 +249,15 @@ function renderList(reset) {
   }
   list.insertAdjacentHTML('beforeend', html);
   state.renderedCount = end;
+
+  // 过滤器把内容全隐藏时给个明确提示，避免用户以为列表坏了
+  if (reset && items.length === 0) {
+    const total = (state.searchScope === 'all' ? allItems() : currentTabItems()).length;
+    if (state.showOnlyUndownloaded && total > 0) {
+      list.innerHTML = `<div class="group-head">当前分类下的 ${total} 个视频都已下载完成，没有未下载的了</div>`;
+      state.renderedCount = 0;
+    }
+  }
 
   $('listMore').classList.toggle('hidden', end >= items.length);
   $('loadMoreInfo').textContent = `已显示 ${end} / ${items.length}`;
@@ -667,20 +693,21 @@ function bind() {
     });
     updateSelectionUI();
   });
-  // 与「仅选未下载」的区别：不清空已有选择，而是在其基础上追加未下载的
-  $('btnSelectAddUnselected').addEventListener('click', () => {
-    const done = new Set(
-      state.queue.filter((q) => q.status === 'done' || q.status === 'skipped').map((q) => q.key)
+  // 与「仅选未下载」的区别：这是一个【显示过滤器】，只影响列表显示什么，不改动勾选
+  $('onlyUndownloaded').addEventListener('change', (e) => {
+    state.showOnlyUndownloaded = e.target.checked;
+    doneSig = [...doneKeys()].sort().join(',');
+    renderList(true);
+    const hidden = currentTabItems().length - filteredItems().length;
+    toast(
+      e.target.checked
+        ? hidden > 0
+          ? `已隐藏 ${hidden} 个已下载的视频`
+          : '当前分类下没有已下载的视频'
+        : '已显示全部视频',
+      'ok',
+      2500
     );
-    let added = 0;
-    visible().forEach((it) => {
-      if (!done.has(it.id) && !state.selected.has(it.id)) {
-        state.selected.add(it.id);
-        added++;
-      }
-    });
-    updateSelectionUI();
-    toast(added ? `已追加 ${added} 个未下载的视频` : '没有新的未下载视频可追加', added ? 'ok' : 'warn');
   });
 
   $('btnDownload').addEventListener('click', () => {
@@ -895,6 +922,14 @@ function bind() {
     state.queue = payload.items || [];
     state.stats = payload.stats || {};
     renderQueue();
+    // 开着「仅显示未下载」时，某个视频下载完成后要把它从列表里摘掉
+    if (state.showOnlyUndownloaded) {
+      const sig = [...doneKeys()].sort().join(',');
+      if (sig !== doneSig) {
+        doneSig = sig;
+        renderList(true);
+      }
+    }
   });
 }
 
