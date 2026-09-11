@@ -259,23 +259,16 @@ async function buildStudyDocx(input) {
     );
     for (const q of quotes) {
       if (q.en) {
-        children.push(
-          new Paragraph({
-            style: 'NoteQ',
-            children: runs(`◆ ${q.en}`, FONT, { size: 22, italics: true, color: '2E4053' }),
-          })
-        );
+        // 时间码【接在英文句末】而不是单独起一行。
+        // 单独一行时它没有缩进、贴着左边距，看起来更像下一句的标签，分不清属于谁（实测踩过）。
+        const kids = runs(`◆ ${q.en}`, FONT, { size: 22, italics: true, color: '2E4053' });
+        if (q.timeText) {
+          kids.push(new TextRun({ text: `　[${q.timeText}]`, font: FONT_UI, size: 18, color: GRAY }));
+        }
+        children.push(new Paragraph({ style: 'NoteQ', children: kids }));
       }
       if (q.zh) {
         children.push(new Paragraph({ style: 'NoteA', children: runs(`　 ${q.zh}`, FONT, { size: 20, color: '34495E' }) }));
-      }
-      if (q.timeText) {
-        children.push(
-          new Paragraph({
-            style: 'MetaLine',
-            children: runs(`　 [${q.timeText}]`, FONT_UI, { size: 16, color: GRAY }),
-          })
-        );
       }
     }
   }

@@ -1,5 +1,21 @@
 # 更新日志
 
+## v1.8.2 — 金句时间码改到句末同行（2026-09-11）
+
+时间码原先单独起一行，而 `NoteQ` / `NoteA` 有 240 的缩进、`MetaLine` 没有，
+所以时间码贴在左边距上，**看起来更像下一句的标签**，分不清属于哪句。
+
+改为**接在英文句末**，同一段落内用较小字号和灰色显示：
+
+```
+◆ Do you understand who you consume? What you consume is who you become.　[0:12]
+　 你明白你在消费谁吗？你消费什么，就会成为什么。
+◆ People are obnoxiously more capable of changing than they realize.　[4:37]
+　 人们改变的能力远超自己的想象，简直令人讨厌。
+```
+
+---
+
 ## v1.8.1 — 文档排版微调（2026-09-11）
 
 - **Takeaways 的条目改用黑色圆点 `●`**，不再用数字序号——这些要点是并列关系，没有先后次序
