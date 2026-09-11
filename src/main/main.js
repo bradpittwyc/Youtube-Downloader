@@ -330,6 +330,22 @@ function registerIpc() {
     return r.filePaths[0];
   });
 
+  /** 原生确认框（用于批量删除这类不可逆操作） */
+  ipcMain.handle('dialog:confirm', async (_e, opts) => {
+    const o = opts || {};
+    const r = await dialog.showMessageBox(mainWindow, {
+      type: o.type || 'warning',
+      buttons: [o.confirmLabel || '确定', '取消'],
+      defaultId: 1, // 默认停在「取消」上，避免误按回车
+      cancelId: 1,
+      title: o.title || '确认',
+      message: o.message || '',
+      detail: o.detail || '',
+      noLink: true,
+    });
+    return r.response === 0;
+  });
+
   // ---- 频道识别 ----
   ipcMain.handle('channel:enumerate', async (_e, { input, force }) => {
     const settings = settingsStore.load();
@@ -468,6 +484,10 @@ function registerIpc() {
   ipcMain.handle('queue:clear', (_e, filter) => {
     queue.clear(filter || 'done');
     return { ok: true, items: queue.snapshot(), stats: queue.stats() };
+  });
+  ipcMain.handle('queue:cancel-all', async () => {
+    const removed = await queue.cancelAll();
+    return { ok: true, removed, items: queue.snapshot(), stats: queue.stats() };
   });
   ipcMain.handle('queue:pause-all', async () => {
     await queue.pauseAll();

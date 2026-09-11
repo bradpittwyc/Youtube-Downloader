@@ -952,6 +952,24 @@ function bind() {
 
   $('btnPauseAll').addEventListener('click', () => api.queue.pauseAll());
   $('btnResumeAll').addEventListener('click', () => api.queue.resumeAll());
+  $('btnCancelAll').addEventListener('click', async () => {
+    const s = state.stats || {};
+    const n =
+      (s.queued || 0) + (s.downloading || 0) + (s.paused || 0) + (s.error || 0) + (s.canceled || 0);
+    if (!n) {
+      toast('队列里没有未完成的任务', 'warn');
+      return;
+    }
+    const ok = await api.dialog.confirm({
+      title: '全部取消',
+      message: `确定要取消队列里 ${n} 个未完成的任务吗？`,
+      detail: '正在下载的会立即停止；这些任务会从队列中移除。\n已经下载完成的文件不受影响，部分下载的分片（.part）会保留在磁盘上。',
+      confirmLabel: '全部取消',
+    });
+    if (!ok) return;
+    const r = await api.queue.cancelAll();
+    toast(`已取消并移除 ${r.removed} 个任务`, 'ok');
+  });
   $('btnClearDone').addEventListener('click', async () => {
     await api.queue.clear('done');
     toast('已清除已完成任务', 'ok');

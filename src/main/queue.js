@@ -1019,6 +1019,32 @@ class DownloadQueue extends EventEmitter {
     return true;
   }
 
+  /**
+   * 全部取消：停掉所有正在下载的，并把队列里【所有未完成】的任务移除。
+   * 保留 done / skipped（已完成或已存在），因为它们对应磁盘上真实的文件。
+   * @returns {Promise<number>} 被移除的任务数
+   */
+  async cancelAll() {
+    // 先杀掉在跑的下载（连同 ffmpeg 子进程一起）
+    const kills = [];
+    for (const [, h] of this.active.entries()) {
+      h.remove = true;
+      h.canceled = true;
+      kills.push(ytdlp.killTree(h.child));
+    }
+    await Promise.all(kills);
+    this.active.clear();
+
+    let removed = 0;
+    for (const [key, it] of Array.from(this.items.entries())) {
+      if (it.status === 'done' || it.status === 'skipped') continue;
+      this.items.delete(key);
+      removed++;
+    }
+    this.changed(true);
+    return removed;
+  }
+
   /** 清空：done / error / canceled / all */
   clear(filter) {
     let removed = 0;

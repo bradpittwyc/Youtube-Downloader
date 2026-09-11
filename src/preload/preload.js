@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('api', {
   dialog: {
     pickFolder: (current) => ipcRenderer.invoke('dialog:pickFolder', current),
     pickFile: () => ipcRenderer.invoke('dialog:pickFile'),
+    confirm: (opts) => ipcRenderer.invoke('dialog:confirm', opts),
   },
 
   channel: {
@@ -43,6 +44,7 @@ contextBridge.exposeInMainWorld('api', {
     list: () => ipcRenderer.invoke('queue:list'),
     action: (key, action) => ipcRenderer.invoke('queue:action', { key, action }),
     clear: (filter) => ipcRenderer.invoke('queue:clear', filter),
+    cancelAll: () => ipcRenderer.invoke('queue:cancel-all'),
     pauseAll: () => ipcRenderer.invoke('queue:pause-all'),
     resumeAll: () => ipcRenderer.invoke('queue:resume-all'),
     onChanged: (cb) => on('queue:changed', cb),
