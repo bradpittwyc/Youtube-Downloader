@@ -229,6 +229,7 @@ class DownloadQueue extends EventEmitter {
       // 而 JSON.parse 遇到 BOM 会直接抛错，整个下载队列就"凭空消失"了（实测踩过）。
       const raw = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
       const list = Array.isArray(raw) ? raw : raw.items || (raw.key ? [raw] : []);
+      let fixed = 0;
       for (const it of list) {
         if (!it || !it.key) continue;
         const item = Object.assign({}, it);
@@ -238,9 +239,31 @@ class DownloadQueue extends EventEmitter {
           item.interrupted = true;
           item.stage = '等待续传';
         }
+        // 自愈：已完成却没记到字幕的任务重新扫一遍磁盘。
+        // 老版本因为文件名截断会漏记（字幕其实就躺在视频旁边），
+        // 不补回来的话界面上既不显示字幕数、也不给「生成文档」的入口。
+        if (
+          (item.status === 'done' || item.status === 'skipped') &&
+          (!item.subPaths || !item.subPaths.length) &&
+          item.filePath
+        ) {
+          try {
+            const found = collectSubtitleFiles(item.filePath);
+            if (found.length) {
+              item.subPaths = found;
+              // 字幕既然找回来了，之前那句"没有英文字幕"的错误提示就是过期的，
+              // 留着会让卡片自相矛盾（一边显示有字幕，一边说没字幕）。
+              if (item.studyError && /没有英文字幕|沒有英文字幕/.test(item.studyError)) {
+                item.studyError = '';
+              }
+              fixed++;
+            }
+          } catch (_) {}
+        }
         this.items.set(item.key, item);
       }
       console.log(`[queue] restored ${this.items.size} item(s)`);
+      if (fixed) console.log(`[queue] 已补回 ${fixed} 个任务遗漏的字幕记录`);
     } catch (err) {
       console.error('[queue] load failed:', err.message);
     }

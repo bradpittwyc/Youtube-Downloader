@@ -560,8 +560,12 @@ function renderQueue() {
     }
     if (q.studyDocPath) {
       buttons.push(['redoDoc', '重做', '重新生成（走翻译缓存，不产生 API 费用；按住 Ctrl 可强制重新翻译）']);
-    } else if (q.subCount > 0) {
-      buttons.push(['redoDoc', '生成文档', '调用大模型生成中英对照学习文档']);
+    } else if ((q.status === 'done' || q.status === 'skipped') && q.fileExists !== false) {
+      // 注意：这里【不能】用 subCount > 0 做条件。
+      // 字幕数量是下载时记下的，可能因为文件名截断之类的原因漏记（实测踩过），
+      // 一旦漏记按钮就整个消失，用户连「重新试一次」的入口都没有。
+      // 只要下载完成且文件还在，就给一个生成入口——生成前会重新扫盘找字幕。
+      buttons.push(['redoDoc', '生成文档', '调用大模型生成中英对照学习文档（会先重新扫描视频旁边的字幕）']);
     }
     buttons.push(['remove', '✕', '从队列移除']);
     const sig = buttons.map((b) => b[0] + b[1]).join(',');
