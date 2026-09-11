@@ -129,8 +129,9 @@ async function buildStudyDocx(input) {
         children: [new TextRun({ text: 'Takeaways', font: FONT_UI, size: 26, bold: true, color: ACCENT })],
       })
     );
-    takeaways.forEach((t, i) => {
-      if (t.en) children.push(new Paragraph({ style: 'BodyEN', children: runs(`${i + 1}. ${t.en}`, FONT) }));
+    takeaways.forEach((t) => {
+      // 用黑色圆点代替序号：Takeaways 是并列的要点，不需要先后次序
+      if (t.en) children.push(new Paragraph({ style: 'BodyEN', children: runs(`● ${t.en}`, FONT) }));
       if (t.zh) children.push(new Paragraph({ style: 'BodyZH', children: runs(`　　 ${t.zh}`, FONT) }));
     });
   }
@@ -254,15 +255,6 @@ async function buildStudyDocx(input) {
         style: 'AppTitle',
         pageBreakBefore: true,
         children: [new TextRun({ text: '金句总结', font: FONT_UI, size: 28, bold: true })],
-      })
-    );
-    children.push(
-      new Paragraph({
-        style: 'MetaLine',
-        children: runs(`共 ${quotes.length} 句，由大模型从全片中挑出；方括号内是原片时间码`, FONT_UI, {
-          size: 18,
-          color: GRAY,
-        }),
       })
     );
     for (const q of quotes) {
