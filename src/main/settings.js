@@ -97,8 +97,23 @@ const DEFAULTS = {
   studyIncludePureEnglish: true,
   studyIncludeVocab: true,
   studyTimecode: true,
-  /** 生成双语 SRT（中英双行） */
-  studyBilingualSrt: true,
+  /**
+   * 中英双语字幕的产出形式。
+   * ASS 是唯一支持「逐行独立颜色/描边」的字幕格式（SRT 零样式、mov_text 支持极差），
+   * 因此要做「中英不同色 + 黑边」必须用 ASS。
+   * .srt 兼容性更好但与 .ass 并存时播放器加载哪个不一定，默认不再生成。
+   */
+  studyAss: true,
+  studyBilingualSrt: false,
+  assColorEn: '#FFFFFF', // 英文字色（白）
+  assColorZh: '#FFD700', // 中文字色（琥珀）
+  assOutlineColor: '#000000', // 黑描边
+  assOutlineWidth: 3, // 描边粗细（相对 1080 高度）
+  assBorderStyle: 1, // 1=描边  3=背景框
+  assShadow: 0,
+  assFontScale: 1, // 整体字号缩放
+  assWrapEnChars: 44,
+  assWrapZhChars: 22,
   /** 价格（元 / 百万 token），仅用于费用预估显示 */
   studyPriceIn: 2,
   studyPriceOut: 8,
@@ -142,12 +157,26 @@ function load() {
   if (cache) return cache;
   const file = settingsFile();
   let disk = {};
+  let migrated = false;
   try {
     if (fs.existsSync(file)) disk = JSON.parse(fs.readFileSync(file, 'utf8')) || {};
   } catch (_) {
     disk = {};
   }
+  // 一次性迁移：升级到 ASS 双语字幕前保存的设置里没有 studyAss 字段。
+  // 那种情况下 studyBilingualSrt 还停在 true，会让 .srt 与 .ass 并存，
+  // 而播放器加载哪个没有统一规则 —— 很容易"看到的是 srt 所以没颜色"。这里自动关掉。
+  if (disk.studyAss === undefined && disk.studyBilingualSrt === true) {
+    disk.studyBilingualSrt = false;
+    migrated = true;
+  }
   cache = normalize(Object.assign({}, DEFAULTS, disk));
+  if (migrated) {
+    try {
+      fs.writeFileSync(file, JSON.stringify(cache, null, 2), 'utf8');
+      console.log('[settings] 已迁移：关闭旧的 .zh-en.srt 输出，改用带颜色的 .ass');
+    } catch (_) {}
+  }
   return cache;
 }
 

@@ -219,6 +219,7 @@ class DownloadQueue extends EventEmitter {
         fetchingSubs: !!it.fetchingSubs,
         studyDocPath: it.studyDocPath || '',
         biSrtPath: it.biSrtPath || '',
+        assPath: it.assPath || '',
         studyError: it.studyError || '',
         studySummary: it.studySummary || '',
         studyStage: it.studyStage || '',
@@ -313,6 +314,8 @@ class DownloadQueue extends EventEmitter {
         thumbnail: it.thumbnail || '',
         duration: it.duration || null,
         uploadDate: '', // 下载开始时由 META| 行填充（YYYYMMDD）
+        width: 0, //  同上，用于 ASS 字幕的分辨率适配
+        height: 0,
         url: it.url || `https://www.youtube.com/watch?v=${it.id}`,
         opts: Object.assign({}, opts),
         status: 'queued',
@@ -327,6 +330,7 @@ class DownloadQueue extends EventEmitter {
         audioError: '',
         subPaths: [],
         subError: '',
+        assPath: '',
         studyDocPath: '',
         biSrtPath: '',
         studyError: '',
@@ -426,7 +430,7 @@ class DownloadQueue extends EventEmitter {
       // 下载开始前拿一次准确的元信息（上传日期/时长/频道），供文件名与学习文档使用。
       // 时长和上传日期放前面、频道放最后：频道名里万一有 | 也只影响尾部。
       '--print',
-      'before_dl:META|%(duration)s|%(upload_date)s|%(channel)s',
+      'before_dl:META|%(duration)s|%(upload_date)s|%(width)s|%(height)s|%(channel)s',
       // 下载完成后的真实落盘路径
       '--print',
       'after_move:FINAL|%(filepath)s',
@@ -525,7 +529,13 @@ class DownloadQueue extends EventEmitter {
       const dur = num(p[1]);
       if (dur != null && dur > 0) item.duration = Math.round(dur);
       if (p[2] && p[2] !== 'NA') item.uploadDate = p[2]; // YYYYMMDD
-      const ch = p.slice(3).join('|').trim();
+      const w = num(p[3]);
+      const h = num(p[4]);
+      if (w && h && w > 0 && h > 0) {
+        item.width = Math.round(w);
+        item.height = Math.round(h);
+      }
+      const ch = p.slice(5).join('|').trim();
       if (ch && !item.channel) item.channel = ch;
       this.changed();
       return;
@@ -877,6 +887,8 @@ class DownloadQueue extends EventEmitter {
         srtPath: srt,
         videoPath: item.filePath,
         videoId: item.id,
+        width: item.width,
+        height: item.height,
         meta: {
           title: item.title,
           channel: item.channel,
@@ -900,6 +912,7 @@ class DownloadQueue extends EventEmitter {
       });
       item.studyDocPath = res.paths.docx || '';
       item.biSrtPath = res.paths.bilingualSrt || '';
+      item.assPath = res.paths.ass || '';
       item.studyFromCache = !!res.fromCache;
       item.studySummary = res.summary;
       item.studyError = '';
@@ -922,6 +935,7 @@ class DownloadQueue extends EventEmitter {
     if (item.filePath) bits.push('视频');
     if (item.audioPath) bits.push('音频');
     if ((item.subPaths || []).length) bits.push(`${item.subPaths.length} 个字幕`);
+    if (item.assPath) bits.push('双语ASS');
     if (item.studyDocPath) bits.push('学习文档');
     return bits.length > 1 ? `已完成（${bits.join(' + ')}）` : '已完成';
   }

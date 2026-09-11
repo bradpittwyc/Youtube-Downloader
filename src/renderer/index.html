@@ -257,8 +257,38 @@
               <label class="check"><input type="checkbox" id="setStudyPureEn" /><span>附纯英文版</span></label>
               <label class="check"><input type="checkbox" id="setStudyVocab" /><span>词汇总表</span></label>
               <label class="check"><input type="checkbox" id="setStudyTimecode" /><span>段落时间码</span></label>
-              <label class="check"><input type="checkbox" id="setStudyBiSrt" /><span>生成中英双语 SRT</span></label>
             </div>
+          </div>
+
+          <div class="setting-row">
+            <label>中英双语字幕样式（ASS：唯一支持中英不同色 + 描边的字幕格式）</label>
+            <div class="checks">
+              <label class="check"><input type="checkbox" id="setStudyAss" /><span>生成 .ass 双语字幕</span></label>
+              <label class="check"
+                ><input type="checkbox" id="setStudyBiSrt" /><span
+                  >同时生成 .srt（兼容性更好，但两者并存时播放器可能加载它而看不到颜色）</span
+                ></label
+              >
+            </div>
+            <div class="inline color-row">
+              <span class="muted">英文字色</span><input id="setAssColorEn" type="color" />
+              <span class="muted">中文字色</span><input id="setAssColorZh" type="color" />
+              <span class="muted">描边色</span><input id="setAssOutlineColor" type="color" />
+              <span class="muted">描边粗细</span>
+              <input id="setAssOutlineWidth" type="number" min="0" max="8" step="0.5" />
+            </div>
+            <div class="inline color-row">
+              <span class="muted">字号缩放</span>
+              <input id="setAssFontScale" type="number" min="0.5" max="2" step="0.1" />
+              <span class="muted">英文每行字符</span>
+              <input id="setAssWrapEn" type="number" min="20" max="80" step="2" />
+              <span class="muted">中文每行字数</span>
+              <input id="setAssWrapZh" type="number" min="8" max="40" step="1" />
+            </div>
+            <small class="muted"
+              >分辨率自动探测并把字号/描边按比例缩放（横屏 1080p 与竖屏 Shorts 各适配一套）。<br />
+              用 PotPlayer / VLC / MPV 播放效果最佳；Windows 自带播放器不支持 ASS 样式。</small
+            >
           </div>
 
           <div class="setting-row">

@@ -790,6 +790,25 @@ input::placeholder {
   height: 1px;
   background: var(--line);
 }
+/* 颜色选择行 */
+.color-row {
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.color-row input[type='color'] {
+  width: 40px;
+  height: 26px;
+  padding: 0 2px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--bg-2);
+  cursor: pointer;
+}
+.color-row input[type='number'] {
+  width: 74px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
 .kernel-info,
 .update-log {
   background: var(--bg);

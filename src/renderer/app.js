@@ -418,6 +418,7 @@ function renderQueue() {
     if (q.audioPath) buttons.push(['openAudio', '音频', '定位导出的音频文件']);
     if (q.subCount > 0) buttons.push(['openSubs', `字幕${q.subCount}`, `定位字幕文件（共 ${q.subCount} 个）`]);
     if (q.biSrtPath) buttons.push(['openBiSrt', '双语', '定位中英双语字幕']);
+    if (q.assPath) buttons.push(['openAss', '彩色字幕', '定位中英不同色 ASS 字幕']);
     if (q.studyDocPath) {
       buttons.push(['openDoc', '文档', '打开学习文档']);
       buttons.push(['redoDoc', '重做', '重新生成（走翻译缓存；如需重新翻译请按住 Ctrl 点击）']);
@@ -437,6 +438,7 @@ function renderQueue() {
     el.setAttribute('data-subs', (q.subPaths && q.subPaths[0]) || '');
     el.setAttribute('data-doc', q.studyDocPath || '');
     el.setAttribute('data-bisrt', q.biSrtPath || '');
+    el.setAttribute('data-ass', q.assPath || '');
     el.setAttribute('data-key', q.key);
   }
 
@@ -564,7 +566,15 @@ async function loadSettingsToForm() {
   $('setStudyPureEn').checked = s.studyIncludePureEnglish !== false;
   $('setStudyVocab').checked = s.studyIncludeVocab !== false;
   $('setStudyTimecode').checked = s.studyTimecode !== false;
-  $('setStudyBiSrt').checked = s.studyBilingualSrt !== false;
+  $('setStudyBiSrt').checked = s.studyBilingualSrt === true;
+  $('setStudyAss').checked = s.studyAss !== false;
+  $('setAssColorEn').value = s.assColorEn || '#FFFFFF';
+  $('setAssColorZh').value = s.assColorZh || '#FFD700';
+  $('setAssOutlineColor').value = s.assOutlineColor || '#000000';
+  $('setAssOutlineWidth').value = s.assOutlineWidth != null ? s.assOutlineWidth : 3;
+  $('setAssFontScale').value = s.assFontScale || 1;
+  $('setAssWrapEn').value = s.assWrapEnChars || 44;
+  $('setAssWrapZh').value = s.assWrapZhChars || 22;
   $('setStudyBase').value = s.studyBaseURL || '';
   $('setStudyModel').value = s.studyModel || '';
   $('setStudyConcurrency').value = s.studyConcurrency || 3;
@@ -793,6 +803,12 @@ function bind() {
       else toast('还没有生成双语字幕', 'warn');
       return;
     }
+    if (act === 'openAss') {
+      const p = el.getAttribute('data-ass');
+      if (p) api.shell.showItem(p);
+      else toast('还没有生成 ASS 双语字幕', 'warn');
+      return;
+    }
     if (act === 'openDoc') {
       const p = el.getAttribute('data-doc');
       if (p) api.shell.openPath(p);
@@ -867,6 +883,14 @@ function bind() {
       studyIncludeVocab: $('setStudyVocab').checked,
       studyTimecode: $('setStudyTimecode').checked,
       studyBilingualSrt: $('setStudyBiSrt').checked,
+      studyAss: $('setStudyAss').checked,
+      assColorEn: $('setAssColorEn').value,
+      assColorZh: $('setAssColorZh').value,
+      assOutlineColor: $('setAssOutlineColor').value,
+      assOutlineWidth: Number($('setAssOutlineWidth').value),
+      assFontScale: Number($('setAssFontScale').value) || 1,
+      assWrapEnChars: Number($('setAssWrapEn').value) || 44,
+      assWrapZhChars: Number($('setAssWrapZh').value) || 22,
       studyBaseURL: $('setStudyBase').value.trim(),
       studyModel: $('setStudyModel').value.trim(),
       studyConcurrency: Number($('setStudyConcurrency').value) || 3,

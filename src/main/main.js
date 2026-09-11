@@ -264,6 +264,8 @@ function registerIpc() {
         videoPath: item.filePath,
         videoId: item.id,
         force: !!force,
+        width: item.width,
+        height: item.height,
         meta: {
           title: item.title,
           channel: item.channel,
@@ -281,6 +283,7 @@ function registerIpc() {
       });
       item.studyDocPath = res.paths.docx || '';
       item.biSrtPath = res.paths.bilingualSrt || '';
+      item.assPath = res.paths.ass || '';
       item.studyFromCache = !!res.fromCache;
       item.studySummary = res.summary;
       item.studyCost = 0;

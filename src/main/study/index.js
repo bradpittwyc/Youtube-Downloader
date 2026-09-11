@@ -9,7 +9,9 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { spawnSync } = require('child_process');
 const sub = require('./subtitle');
+const assMod = require('./ass');
 const llm = require('./llm');
 const secret = require('./secret');
 const { runStudyPipeline, estimateTokens, summarize } = require('./pipeline');
@@ -36,12 +38,39 @@ function writeFileSafe(p, data) {
   }
 }
 
-/** 从视频路径推导产物路径 */function derivePaths(videoPath, srtPath) {
+/** 从视频路径推导产物路径 */
+function derivePaths(videoPath, srtPath) {
   const base = videoPath ? videoPath.replace(/\.[^.\\/]+$/, '') : String(srtPath).replace(/\.en\.srt$/i, '');
   return {
     bilingualSrt: `${base}.zh-en.srt`,
+    ass: `${base}.zh-en.ass`,
     docx: `${base}.学习文档.docx`,
   };
+}
+
+/**
+ * 用 ffmpeg 探测视频分辨率。
+ * ASS 的 PlayResX/PlayResY 必须与真实分辨率一致，否则字号和定位会整体错乱；
+ * 下载时抓到的宽高优先，这里是老任务/异常情况的兜底。
+ */
+function probeVideoSize(ffmpegExe, file) {
+  if (!ffmpegExe || !file || !fs.existsSync(file)) return null;
+  try {
+    const r = spawnSync(ffmpegExe, ['-hide_banner', '-i', file], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    const text = (r.stderr || '') + (r.stdout || '');
+    const m = text.match(/Video:[\s\S]*?,\s*(\d{2,5})x(\d{2,5})/);
+    if (m) {
+      const width = parseInt(m[1], 10);
+      const height = parseInt(m[2], 10);
+      if (width > 0 && height > 0) return { width, height };
+    }
+  } catch (_) {
+    /* 探测失败就退回默认值 */
+  }
+  return null;
 }
 
 /** 把设置里的 LLM 配置取出来（API Key 在此解密） */
@@ -171,11 +200,56 @@ async function generateForVideo(o) {
   }
 
   const paths = derivePaths(o.videoPath, o.srtPath);
-  const wrote = { bilingualSrt: '', docx: '' };
+  const wrote = { bilingualSrt: '', ass: '', docx: '' };
 
-  // 双语 SRT
+  // 分辨率：优先用下载时抓到的，其次 ffmpeg 探测，最后退回 1920x1080
+  let size = null;
+  if (Number(o.width) > 0 && Number(o.height) > 0) {
+    size = { width: Number(o.width), height: Number(o.height) };
+  } else {
+    size = probeVideoSize(require('../paths').ffmpegPath(settings), o.videoPath);
+  }
+  const vw = (size && size.width) || 1920;
+  const vh = (size && size.height) || 1080;
+
+  // ---- 中英双语 ASS（可分别设色 + 黑描边）----
+  if (settings.studyAss !== false) {
+    onProgress({ phase: 'write', done: 0, total: 3, label: '生成双语 ASS 字幕' });
+    const assText = assMod.buildAss({
+      cues: res.cues,
+      cueZh: res.cueZh,
+      title: (o.meta && o.meta.title) || '',
+      width: vw,
+      height: vh,
+      options: {
+        colorEn: settings.assColorEn,
+        colorZh: settings.assColorZh,
+        outlineColor: settings.assOutlineColor,
+        outlineWidth: settings.assOutlineWidth,
+        borderStyle: settings.assBorderStyle,
+        shadow: settings.assShadow,
+        fontScale: settings.assFontScale,
+        wrapEnChars: settings.assWrapEnChars,
+        wrapZhChars: settings.assWrapZhChars,
+      },
+    });
+    if (assText.trim()) {
+      writeFileSafe(paths.ass, assText);
+      wrote.ass = paths.ass;
+      // 同一个视频旁边若还留着旧的 .zh-en.srt，播放器可能挑它加载，结果"看不到颜色"。
+      // 关闭 srt 输出时顺手清掉——这是本工具自己生成的产物，且随时可从缓存免费重建。
+      if (settings.studyBilingualSrt === false && fs.existsSync(paths.bilingualSrt)) {
+        try {
+          fs.unlinkSync(paths.bilingualSrt);
+          console.log('[study] 已清理旧的 .zh-en.srt（避免播放器加载它而看不到 ASS 颜色）');
+        } catch (_) {}
+      }
+    }
+  }
+
+  // ---- 双语 SRT（可选，兼容性更好）----
   if (settings.studyBilingualSrt !== false) {
-    onProgress({ phase: 'write', done: 0, total: 2, label: '生成双语字幕' });
+    onProgress({ phase: 'write', done: 1, total: 3, label: '生成双语字幕' });
     const srtText = sub.buildBilingualSrt(res.cues, res.cueZh);
     if (srtText.trim()) {
       writeFileSafe(paths.bilingualSrt, srtText);
@@ -183,9 +257,9 @@ async function generateForVideo(o) {
     }
   }
 
-  // Word
+  // ---- Word ----
   if (res.segments && res.segments.length) {
-    onProgress({ phase: 'write', done: 1, total: 2, label: '排版 Word 文档' });
+    onProgress({ phase: 'write', done: 2, total: 3, label: '排版 Word 文档' });
     const buf = await buildStudyDocx({
       meta: Object.assign({}, o.meta, { model: cfg.model }),
       segments: res.segments,
@@ -226,4 +300,5 @@ module.exports = {
   isConfigured,
   clearCache,
   writeFileSafe,
+  probeVideoSize,
 };
