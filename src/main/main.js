@@ -697,6 +697,9 @@ function registerIpc() {
       case 'retry':
         queue.retry(key);
         break;
+      case 'retryNow':
+        queue.retryNow(key);
+        break;
       case 'remove':
         await queue.remove(key);
         break;

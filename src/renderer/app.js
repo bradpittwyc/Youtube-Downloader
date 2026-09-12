@@ -579,6 +579,14 @@ function renderQueue() {
       if (q.downloadedBytes) parts.push(fmtBytes(q.downloadedBytes) + (q.totalBytes ? ' / ' + fmtBytes(q.totalBytes) : ''));
       stageText = `${q.stage} ${parts.join(' · ')}`;
     }
+    // 退避等待中：显示实时倒计时（每行单独更新，见 retryTicker）
+    if (q.nextRetryAt && q.nextRetryAt > Date.now()) {
+      el.dataset.retryAt = String(q.nextRetryAt);
+      el.dataset.retryLabel = q.retryKind === 'throttle' ? 'YouTube 限流，' : q.retryKind === 'transient' ? '网络问题，' : '';
+      stageText = `⏸ ${el.dataset.retryLabel}${fmtRetryIn(q.nextRetryAt)}后自动重试`;
+    } else {
+      delete el.dataset.retryAt;
+    }
     if (q.extractingAudio) stageText = '⏳ ' + stageText;
     if (q.fetchingSubs) stageText = '⏳ ' + stageText;
     if (q.studying) stageText = `⏳ ${q.studyStage || '生成学习文档'}…`;
@@ -618,7 +626,12 @@ function renderQueue() {
     const acts = el.querySelector('.q-actions');
     const buttons = [];
     if (q.status === 'downloading') buttons.push(['pause', '暂停', '暂停（支持断点续传）']);
-    if (q.status === 'queued') buttons.push(['pause', '暂停', '']);
+    if (q.status === 'queued' && q.nextRetryAt && q.nextRetryAt > Date.now()) {
+      // 退避等待中的任务：给一个「立即重试」，不用干等
+      buttons.push(['retryNow', '立即重试', '不等退避了，马上再试一次']);
+    } else if (q.status === 'queued') {
+      buttons.push(['pause', '暂停', '']);
+    }
     if (q.status === 'paused' || q.status === 'canceled') buttons.push(['resume', '继续', '从断点继续下载']);
     if (q.status === 'error') buttons.push(['retry', '重试', '']);
     // 只保留「打开」与「重做」。
@@ -843,6 +856,36 @@ async function testCookies() {
     out.textContent = '失败：' + (err && err.message);
     out.style.color = 'var(--err)';
   }
+}
+
+/* ==================== 退避重试的倒计时 ==================== */
+
+/** 「还有多久重试」的人话描述 */
+function fmtRetryIn(ts) {
+  const s = Math.max(0, Math.round((ts - Date.now()) / 1000));
+  if (s < 60) return `${s} 秒`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r ? `${m} 分 ${r} 秒` : `${m} 分钟`;
+}
+
+/**
+ * 每秒刷一遍「等待重试」的倒计时。
+ * 只动那几行文字，不重绘整个列表（列表可能有上千行）。
+ */
+function startRetryTicker() {
+  setInterval(() => {
+    for (const el of document.querySelectorAll('#queueList [data-retry-at]')) {
+      const at = Number(el.dataset.retryAt || 0);
+      if (!at) continue;
+      const stage = el.querySelector('.q-stage');
+      if (!stage) continue;
+      if (at > Date.now()) {
+        stage.textContent = `⏸ ${el.dataset.retryLabel || ''}${fmtRetryIn(at)}后自动重试`;
+      }
+      // 到点后由主进程重新排队，队列变更会触发整体重绘，这里不用管
+    }
+  }, 1000);
 }
 
 /* ==================== 最近下载的博主 ==================== */
@@ -1537,6 +1580,7 @@ async function enqueue(items) {
   await loadRecentChannels();
   loadFontList();
   await loadDownloadsIndex();
+  startRetryTicker();
 
   const info = await api.info();
   if (!info.isPackaged) {

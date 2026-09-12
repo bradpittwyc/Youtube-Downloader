@@ -158,6 +158,50 @@ function readInfoJson(videoPath) {
   }
 }
 
+/**
+ * 秒数 → 人话（"30 秒" / "2 分钟" / "1 分 30 秒"）
+ */
+function fmtWait(sec) {
+  const s = Math.max(1, Math.round(sec));
+  if (s < 60) return `${s} 秒`;
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return r ? `${m} 分 ${r} 秒` : `${m} 分钟`;
+}
+
+/**
+ * 错误分级：决定「要不要重试」以及「等多久再试」。
+ *
+ * 关键区别在于：有些错误**需要时间才能恢复**，立刻重试毫无意义 ——
+ * 典型就是 YouTube 的风控与 429 限流，实测几分钟后自己就好了。
+ * 之前是无间隔立即重试，autoRetry=3 会在两三秒内全部烧光，任务直接判死。
+ * （实测过：切换 player_client 绕不过去，风控是按 IP 判的。）
+ */
+function classifyError(text) {
+  const s = String(text || '');
+  if (/Sign in to confirm|not a bot|HTTP Error 429|Too Many Requests|rate.?limit|请求过于频繁/i.test(s)) {
+    return { kind: 'throttle', delays: [20, 60, 180, 300], reason: 'YouTube 限流，需要等待' };
+  }
+  if (
+    /timed out|Timeout|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|HTTP Error 5\d\d|temporarily unavailable|Connection reset|remote end closed/i.test(
+      s
+    )
+  ) {
+    return { kind: 'transient', delays: [3, 10, 30], reason: '网络问题' };
+  }
+  if (
+    // 注意 "video" 和 "unavailable" 中间可能夹着 "is"：
+    // 实测 yt-dlp 的原文是 "This video is unavailable"，
+    // 而单元测试里我写的是 "Video unavailable"，差点漏掉（E2E 才测出来）
+    /video\s+(is\s+)?(unavailable|not\s+available)|private\s+video|members[- ]only|incomplete\s+youtube\s+id|unsupported\s+url|http\s+error\s+404|has\s+been\s+removed|account\s+has\s+been\s+terminated|no\s+longer\s+available|video\s+is\s+private/i.test(
+      s
+    )
+  ) {
+    return { kind: 'permanent', delays: [], reason: '视频已不可访问' };
+  }
+  return { kind: 'unknown', delays: [5, 20, 60], reason: '' };
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -437,6 +481,9 @@ class DownloadQueue extends EventEmitter {
         studying: !!it.studying,
         error: it.error || '',
         attempts: it.attempts || 0,
+        /** 退避重试：到点前不会重新开始（界面据此显示倒计时） */
+        nextRetryAt: it.nextRetryAt || 0,
+        retryKind: it.retryKind || '',
         interrupted: !!it.interrupted,
         audioOnly: !!it.opts.audioOnly,
         quality: it.opts.quality,
@@ -599,11 +646,43 @@ class DownloadQueue extends EventEmitter {
     const settings = settingsStore.load();
     const limit = Math.max(1, Math.min(6, Number(settings.concurrency) || 2));
     if (this.active.size >= limit) return;
+    const now = Date.now();
     const pending = Array.from(this.items.values()).filter((it) => it.status === 'queued');
     for (const item of pending) {
       if (this.active.size >= limit) break;
+      // 退避中的任务还没到点，先跳过（否则重试就没意义了）
+      if (item.nextRetryAt && item.nextRetryAt > now) continue;
       this._start(item);
     }
+    this._scheduleRetryWake();
+  }
+
+  /**
+   * 让「退避等待中」的任务在到点时被唤醒。
+   * 用一个定时器盯住最早的那个，不用轮询。
+   */
+  _scheduleRetryWake() {
+    if (this._retryTimer) {
+      clearTimeout(this._retryTimer);
+      this._retryTimer = null;
+    }
+    const now = Date.now();
+    let earliest = Infinity;
+    for (const it of this.items.values()) {
+      if (it.nextRetryAt && it.nextRetryAt > now && it.nextRetryAt < earliest) earliest = it.nextRetryAt;
+    }
+    if (!isFinite(earliest)) return;
+    const delay = Math.max(500, earliest - now);
+    this._retryTimer = setTimeout(() => {
+      this._retryTimer = null;
+      for (const it of this.items.values()) {
+        if (it.nextRetryAt && it.nextRetryAt <= Date.now()) {
+          it.nextRetryAt = 0;
+        }
+      }
+      this.changed(true);
+      this.pump();
+    }, delay);
   }
 
   _start(item) {
@@ -939,14 +1018,29 @@ class DownloadQueue extends EventEmitter {
 
     const settings = settingsStore.load();
     const maxRetry = Math.max(0, Math.min(10, Number(settings.autoRetry) || 0));
-    if (item.attempts < maxRetry) {
+    const cls = classifyError(errText);
+    if (cls.delays.length && item.attempts < maxRetry) {
+      // 分级退避：限流/风控这类错误"等一会儿"就好了，立刻重试纯属浪费额度。
+      // 之前是无间隔立即重试，autoRetry=3 会在两三秒内全部烧光，任务直接判死。
+      const idx = Math.min(item.attempts, cls.delays.length - 1);
+      const delaySec = cls.delays[idx];
       item.attempts += 1;
       item.status = 'queued';
-      item.stage = `失败，第 ${item.attempts} 次自动重试（断点续传）`;
+      item.nextRetryAt = Date.now() + delaySec * 1000;
+      item.retryKind = cls.kind;
+      item.stage = `失败，${fmtWait(delaySec)}后自动重试（第 ${item.attempts} 次）`;
+      console.log(`[queue] ${item.id} ${cls.kind} 错误，${delaySec}s 后重试：${errText.slice(0, 90)}`);
+      this.changed(true);
+    } else if (cls.delays.length) {
+      item.status = 'error';
+      item.stage = '失败（重试次数已用完）';
+      item.nextRetryAt = 0;
       this.changed(true);
     } else {
+      // 永久性错误（视频不存在 / 私享 / 会员专属）重试多少次都一样，直接失败
       item.status = 'error';
-      item.stage = '失败';
+      item.stage = '失败' + (cls.reason ? `（${cls.reason}）` : '');
+      item.nextRetryAt = 0;
       this.changed(true);
     }
     this.pump();
@@ -1288,9 +1382,23 @@ class DownloadQueue extends EventEmitter {
     item.attempts = 0;
     item.status = 'queued';
     item.error = '';
+    item.nextRetryAt = 0;
     item.stage = '重试中';
     this.changed(true);
     this.pump();
+    return true;
+  }
+
+  /** 不等退避了，马上重试（保留已累计的重试次数） */
+  retryNow(key) {
+    const item = this.items.get(key);
+    if (!item) return false;
+    item.nextRetryAt = 0;
+    if (item.status === 'queued') {
+      item.stage = '立即重试中';
+      this.changed(true);
+      this.pump();
+    }
     return true;
   }
 
@@ -1410,4 +1518,6 @@ module.exports = {
   collectSubtitleFiles,
   refreshSubPaths,
   readInfoJson,
+  classifyError,
+  fmtWait,
 };
