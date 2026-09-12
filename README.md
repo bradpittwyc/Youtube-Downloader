@@ -168,6 +168,56 @@ $env:YTDL_DEV_EXEC=1
 
 ---
 
+## 版本回滚与重建
+
+每个版本都打了 git tag（`v1.0.0` … `v1.8.2`，共 20 个）。
+**tag 才是回滚的权威依据**；`releases/` 里只是预先构建好的安装包，为了方便。
+
+### 直接回退程序
+
+```powershell
+releases\v1.7.1\YouTubeDownloader-Portable-1.7.1.exe   # 免安装，双击即用
+releases\v1.7.1\YouTubeDownloader-Setup-1.7.1.exe     # 或重新安装
+```
+
+### 回退源码
+
+```bash
+git checkout v1.7.1          # 切到那个版本
+git switch -c rollback-1.7   # 或基于它开分支
+```
+
+### 重建被精简掉的版本
+
+`releases/` 只保留了几个关键版本（**v1.0.0 / v1.5.1 / v1.6.2 / v1.7.1 / v1.8.2**），
+其余 15 个已删除以节省约 4.4 GB 磁盘。它们**全部可以从 tag 重建**：
+
+```powershell
+$tag = 'v1.4.1'
+git worktree add ..\_rebuild $tag      # 把该版本检出到旁边目录，不动当前工作区
+cd ..\_rebuild
+npm install                            # node_modules 未被跟踪，需要装一次
+npm run dist                           # 产出 dist\*.exe
+Copy-Item dist\*.exe "..\youtubedownloader\releases\$tag\" -Force
+cd ..\youtubedownloader
+git worktree remove ..\_rebuild
+```
+
+### 回滚时的注意事项
+
+**`%APPDATA%\youtube-downloader\`（设置 / 队列 / 缓存）是所有版本共用的，不会跟着回滚。**
+几个具体的坑：
+
+| 回滚到 | 风险 |
+|---|---|
+| ≤ v1.5.0 | `--download-archive` 重新生效，"删了文件仍判为已下载""换清晰度下不动"会回来 |
+| ≤ v1.7.1（从 v1.8.x 退） | 学习缓存里是 `promptVersion=4`，旧版本视为不匹配 → **重新翻译，会产生 API 费用** |
+| 其他 | settings.json / queue.json 里多出的新字段会被旧版本忽略，基本安全 |
+
+要彻底干净地回滚，先把 `%APPDATA%\youtube-downloader\` 改名备份，让旧版本从默认设置重新开始。
+
+---
+
 ## 技术实现要点
 
 - **Electron 44** + **electron-builder 26**（NSIS 安装包 + portable）
