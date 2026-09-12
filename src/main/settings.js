@@ -87,7 +87,17 @@ const DEFAULTS = {
   skipDownloaded: true,
   rateLimit: '', // 例如 '2M'，空 = 不限速
   proxy: '',
+  /**
+   * cookies.txt 文件路径。与 cookieBrowser 二选一，**文件优先**（明确指定，更好排错）。
+   * 两者都会作用于【所有】yt-dlp 调用：下载、抓字幕、频道识别、视频探测。
+   */
   cookieFile: '',
+  /**
+   * 从浏览器直接读 Cookies（yt-dlp --cookies-from-browser）。
+   * 用于绕过 YouTube 的「Sign in to confirm you're not a bot」风控，
+   * 比手动导出 cookies.txt 省事得多。取值如 edge / chrome / firefox。
+   */
+  cookieBrowser: '',
   liveFromStart: false, // 直播：从开头录制（需要该直播支持 DVR）
   embedMetadata: true,
   embedThumbnail: true, // 仅音频生效；视频嵌入封面需转码，默认不启用

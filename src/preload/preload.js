@@ -37,6 +37,12 @@ contextBridge.exposeInMainWorld('api', {
     details: (url) => ipcRenderer.invoke('video:details', { url }),
   },
 
+  /** Cookies：检测本机浏览器 + 实测配置是否生效 */
+  cookies: {
+    detect: () => ipcRenderer.invoke('cookies:detect'),
+    test: (patch) => ipcRenderer.invoke('cookies:test', patch),
+  },
+
   dialog: {
     pickFolder: (current) => ipcRenderer.invoke('dialog:pickFolder', current),
     pickFile: () => ipcRenderer.invoke('dialog:pickFile'),

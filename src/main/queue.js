@@ -14,6 +14,7 @@ const settingsStore = require('./settings');
 const study = require('./study');
 const channelsStore = require('./channels-store');
 const downloadsIndex = require('./downloads-index');
+const { authArgs } = require('./ytdlp-auth');
 
 /**
  * 分辨率上限（只限制高度，具体编码由编码策略决定）
@@ -727,8 +728,10 @@ class DownloadQueue extends EventEmitter {
     // 改为依赖 yt-dlp 的默认行为：目标文件已存在就跳过，不存在就下载。
     // 文件名模板不含清晰度，所以要换清晰度时必须先把旧文件删掉（见 _start 里的 replaceFile）。
 
-    if (o.rateLimit) a.push('--limit-rate', o.rateLimit);    if (o.proxy) a.push('--proxy', o.proxy);
-    if (o.cookieFile) a.push('--cookies', o.cookieFile);
+    if (o.rateLimit) a.push('--limit-rate', o.rateLimit);
+    // Cookies / 代理统一走 authArgs，保证和识别、探测用的是同一套配置
+    const auth = authArgs(settings);
+    if (auth.length) a.push(...auth);
 
     if (o.audioOnly) {
       a.push('-x', '--audio-format', o.audioFormat || 'mp3', '--audio-quality', '0');
@@ -1058,6 +1061,10 @@ class DownloadQueue extends EventEmitter {
     // YouTube 绝大多数视频只有「自动生成字幕」，不开这个会出现「明明有字幕却一个都没下」
     if (item.opts.writeAutoSubs !== false) args.push('--write-auto-subs');
     if (ffDir) args.push('--ffmpeg-location', ffDir);
+    // 抓字幕是【独立的一次 yt-dlp 调用】，同样要带身份参数，
+    // 否则前面下载成功了、字幕这一步却被风控拦掉（实测踩过，表现成"没有英文字幕"）
+    const subAuth = authArgs(settings);
+    if (subAuth.length) args.push(...subAuth);
     args.push('--no-playlist', item.url);
 
     item.fetchingSubs = true;

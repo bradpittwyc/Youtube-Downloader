@@ -159,6 +159,9 @@ async function dumpFlat(bin, url, opts = {}) {
     '--extractor-args',
     'youtubetab:approximate_date',
   ]);
+  // 身份/网络参数（Cookies、代理）必须带上：识别阶段同样会被 YouTube 风控拦，
+  // 之前只在下载那一步加，导致"配了 cookie 识别照样失败"（实测踩过）
+  if (opts.auth && opts.auth.length) args.push(...opts.auth);
   if (opts.playlistEnd && opts.playlistEnd > 0) args.push('--playlist-end', String(opts.playlistEnd));
   args.push(url);
 
@@ -228,7 +231,7 @@ async function enumerateChannel(bin, channelBase, opts = {}) {
     if (onProgress) onProgress({ phase: 'tab', tab: sec, index: i, total: tabs.length });
 
     const tabUrl = `${channelBase}/${tab}`;
-    const res = await dumpFlat(bin, tabUrl, { onChild: opts.onChild });
+    const res = await dumpFlat(bin, tabUrl, { onChild: opts.onChild, auth: opts.auth });
 
     if (!res.ok) {
       if (res.missing) {
@@ -296,6 +299,7 @@ async function enumerateChannel(bin, channelBase, opts = {}) {
         maxItems,
         onProgress,
         onChild: opts.onChild,
+        auth: opts.auth,
         concurrency: Math.max(1, Number(opts.expandConcurrency) || 3),
       });
     }
@@ -313,7 +317,7 @@ async function enumerateChannel(bin, channelBase, opts = {}) {
  * 识别结果有 30 分钟缓存，所以同样的频道重复识别不会再发这些请求。
  */
 async function expandContainers(bin, containers, sec, ctx) {
-  const { result, byId, maxItems, onProgress, onChild, concurrency } = ctx;
+  const { result, byId, maxItems, onProgress, onChild, concurrency, auth } = ctx;
   const label = TAB_LABEL[sec] || sec;
   let done = 0;
   let cursor = 0;
@@ -326,7 +330,7 @@ async function expandContainers(bin, containers, sec, ctx) {
       if (onProgress) {
         onProgress({ phase: 'expand-playlist', tab: sec, index: done, total: containers.length, label: c.title || '' });
       }
-      const sub = await dumpFlat(bin, c.url, { onChild });
+      const sub = await dumpFlat(bin, c.url, { onChild, auth });
       done++;
       if (!sub.ok) {
         result.warnings.push({
@@ -382,7 +386,7 @@ function pushItem(result, byId, item, maxItems) {
 
 /** 按需抓取某个播放列表里的视频（用户在界面上点开某个播放列表时才调用） */
 async function playlistItems(bin, url, playlistTitle, opts = {}) {
-  const res = await dumpFlat(bin, url, { onChild: opts.onChild });
+  const res = await dumpFlat(bin, url, { onChild: opts.onChild, auth: opts.auth });
   if (!res.ok) return { ok: false, error: res.error };
   const json = res.json;
   const entries = Array.isArray(json.entries) ? json.entries.filter(Boolean) : [];
@@ -395,7 +399,7 @@ async function playlistItems(bin, url, playlistTitle, opts = {}) {
 
 /** 枚举单个播放列表 */
 async function enumeratePlaylist(bin, url, opts = {}) {
-  const res = await dumpFlat(bin, url, { onChild: opts.onChild });
+  const res = await dumpFlat(bin, url, { onChild: opts.onChild, auth: opts.auth });
   if (!res.ok) return { ok: false, error: res.error };
   const json = res.json;
   const entries = Array.isArray(json.entries) ? json.entries.filter(Boolean) : [];
@@ -426,7 +430,9 @@ async function enumeratePlaylist(bin, url, opts = {}) {
  * 列表页用的是 --flat-playlist，**不含文案**，所以只能点开时按需再拉一次。
  */
 async function videoDetails(bin, url, opts = {}) {
-  const args = BASE_FLAGS.concat(['--dump-single-json', '--no-playlist', url]);
+  const args = BASE_FLAGS.concat(['--dump-single-json', '--no-playlist']);
+  if (opts.auth && opts.auth.length) args.push(...opts.auth);
+  args.push(url);
   const res = await run(bin, args, { onChild: opts.onChild });
   if (res.code !== 0) {
     return { ok: false, error: extractErrors(res.stderr) || '视频信息获取失败' };
@@ -461,7 +467,10 @@ async function videoDetails(bin, url, opts = {}) {
 }
 
 /** 单个视频的元信息（用于粘贴单个视频链接的场景） */
-async function probeVideo(bin, url, opts = {}) {  const args = BASE_FLAGS.concat(['--dump-single-json', '--no-playlist', url]);
+async function probeVideo(bin, url, opts = {}) {
+  const args = BASE_FLAGS.concat(['--dump-single-json', '--no-playlist']);
+  if (opts.auth && opts.auth.length) args.push(...opts.auth);
+  args.push(url);
   const res = await run(bin, args, { onChild: opts.onChild });
   if (res.code !== 0) return { ok: false, error: extractErrors(res.stderr) || '视频信息获取失败' };
   try {

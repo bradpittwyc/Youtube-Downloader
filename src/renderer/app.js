@@ -797,6 +797,54 @@ async function openPreview(id) {
   }
 }
 
+/* ==================== Cookies（浏览器 / 文件 / 实测） ==================== */
+
+/** 把本机装了哪些浏览器填进下拉框；没装的标灰，避免选了却读不到 */
+async function loadCookieBrowsers() {
+  try {
+    const r = await api.cookies.detect();
+    const sel = $('setCookieBrowser');
+    const cur = sel.value;
+    sel.innerHTML =
+      '<option value="">不使用</option>' +
+      ((r && r.browsers) || [])
+        .map(
+          (b) =>
+            `<option value="${esc(b.id)}"${b.available ? '' : ' disabled'}>${esc(b.name)}${
+              b.available ? '' : '（未安装）'
+            }</option>`
+        )
+        .join('');
+    if (cur) sel.value = cur;
+  } catch (err) {
+    console.error('loadCookieBrowsers failed:', err && err.message);
+  }
+}
+
+/** 实测 Cookies 是否真的生效（只配了不算数，YouTube 认不认要试了才知道） */
+async function testCookies() {
+  const out = $('cookieTestResult');
+  out.textContent = '测试中…';
+  out.style.color = '';
+  try {
+    // 传当前表单里的值：用户往往是选完就点测试，此时还没保存
+    const r = await api.cookies.test({
+      cookieBrowser: $('setCookieBrowser').value,
+      cookieFile: $('setCookieFile').value.trim(),
+    });
+    if (r && r.ok) {
+      out.textContent = `生效（读到：${String(r.title || '').slice(0, 24)}）`;
+      out.style.color = 'var(--ok)';
+    } else {
+      out.textContent = '失败：' + String((r && r.error) || '未知错误').slice(0, 200);
+      out.style.color = 'var(--err)';
+    }
+  } catch (err) {
+    out.textContent = '失败：' + (err && err.message);
+    out.style.color = 'var(--err)';
+  }
+}
+
 /* ==================== 最近下载的博主 ==================== */
 
 async function loadRecentChannels() {
@@ -914,6 +962,8 @@ async function loadSettingsToForm() {
   $('setRateLimit').value = s.rateLimit || '';
   $('setProxy').value = s.proxy || '';
   $('setCookieFile').value = s.cookieFile || '';
+  $('setCookieBrowser').value = s.cookieBrowser || '';
+  $('cookieTestResult').textContent = '';
   $('setSkipDownloaded').checked = s.skipDownloaded !== false;
   $('setEmbedMeta').checked = s.embedMetadata !== false;
   $('setEmbedThumb').checked = s.embedThumbnail !== false;
@@ -1320,6 +1370,7 @@ function bind() {
     if (p) $('setCookieFile').value = p;
   });
   $('btnClearCookie').addEventListener('click', () => ($('setCookieFile').value = ''));
+  $('btnTestCookie').addEventListener('click', testCookies);
 
   $('btnSaveSettings').addEventListener('click', async () => {
     const patch = {
@@ -1333,6 +1384,7 @@ function bind() {
       rateLimit: $('setRateLimit').value.trim(),
       proxy: $('setProxy').value.trim(),
       cookieFile: $('setCookieFile').value.trim(),
+      cookieBrowser: $('setCookieBrowser').value,
       skipDownloaded: $('setSkipDownloaded').checked,
       embedMetadata: $('setEmbedMeta').checked,
       embedThumbnail: $('setEmbedThumb').checked,
@@ -1473,6 +1525,8 @@ async function enqueue(items) {
 (async function init() {
   bind();
   clearChannelView();
+  // 先填浏览器下拉框，loadSettingsToForm 才能把已保存的值选上
+  await loadCookieBrowsers();
   await loadSettingsToForm();
   await refreshKernelInfo();
   const q = await api.queue.list();

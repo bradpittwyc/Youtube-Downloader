@@ -17,6 +17,7 @@ const studyLlm = require('./study/llm');
 const secret = require('./study/secret');
 const channelsStore = require('./channels-store');
 const downloadsIndex = require('./downloads-index');
+const { authArgs, detectBrowsers, authSummary, explainCookieError } = require('./ytdlp-auth');
 const queueMod = require('./queue');
 const { DownloadQueue } = queueMod;
 
@@ -150,6 +151,7 @@ function channelCacheFile(base) {
 }
 
 // ---------------------------------------------------------------- IPC
+
 
 /**
  * 读取系统已安装的字体族名，供字幕字体选择使用。
@@ -416,6 +418,7 @@ function registerIpc() {
       if (target.kind === 'video') {
         send({ phase: 'probe', label: '读取视频信息…' });
         const res = await channel.probeVideo(bin, target.url, {
+          auth: authArgs(settings),
           onChild: (c) => {
             activeEnumerate = { child: c, canceled: false };
           },
@@ -471,6 +474,7 @@ function registerIpc() {
       const out = await enumerator(bin, baseUrl, {
         maxItems: Number(settings.maxItemsPerChannel) || 0,
         readPlaylists: settings.readPlaylists !== false,
+        auth: authArgs(settings),
         onProgress: (p) => send(p),
         onChild: (c) => {
           if (activeEnumerate && activeEnumerate.canceled) {
@@ -503,7 +507,7 @@ function registerIpc() {
     if (!bin) return { ok: false, error: '未找到 yt-dlp.exe' };
     if (!url) return { ok: false, error: '缺少播放列表地址' };
     try {
-      const res = await channel.playlistItems(bin, url, title || '');
+      const res = await channel.playlistItems(bin, url, title || '', { auth: authArgs(settingsStore.load()) });
       if (!res.ok) return { ok: false, error: res.error };
       return { ok: true, items: res.items, title: res.title };
     } catch (err) {
@@ -556,8 +560,55 @@ function registerIpc() {
     return true;
   });
 
-  /** 系统已安装的字体族名（用于字幕字体选择） */
-  ipcMain.handle('fonts:list', () => {
+  // ---- Cookies（YouTube 风控）----
+  /** 本机装了哪些浏览器 + 当前生效的配置 */
+  ipcMain.handle('cookies:detect', () => {
+    try {
+      const s = settingsStore.load();
+      return { ok: true, browsers: detectBrowsers(), summary: authSummary(s), browser: s.cookieBrowser || '' };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err), browsers: [] };
+    }
+  });
+
+  /**
+   * 实测一次：用当前 Cookies 配置去请求一个真实视频。
+   * 只配了不算数 —— 能不能过风控要试了才知道。
+   * patch 优先：用户刚在下拉框里选完就点测试时还没保存，
+   * 只读设置文件会得到旧值（实测踩过：选了 Edge 却提示"尚未配置"）。
+   */
+  ipcMain.handle('cookies:test', async (_e, patch) => {
+    const saved = settingsStore.load();
+    const s = Object.assign({}, saved, patch || {});
+    const bin = paths.ytDlpPath(saved);
+    if (!bin) return { ok: false, error: '未找到 yt-dlp.exe' };
+    const auth = authArgs(s);
+    if (!auth.length) {
+      return { ok: false, error: '尚未配置 Cookies：既没选浏览器，也没填 cookies.txt 文件' };
+    }
+    // 固定用一个长期存在的视频做探针（YouTube 第一个视频）
+    const probe = 'https://www.youtube.com/watch?v=jNQXAC9IVRw';
+    const args = ytdlp.BASE_FLAGS.concat([
+      '--no-playlist',
+      '--skip-download',
+      '--print',
+      '%(title)s',
+      ...auth,
+      probe,
+    ]);
+    try {
+      const r = await ytdlp.run(bin, args);
+      if (r.code === 0 && r.stdout.trim()) {
+        return { ok: true, title: r.stdout.trim().split(/\r?\n/)[0], used: authSummary(s) };
+      }
+      const raw = ytdlp.extractErrors(r.stderr) || 'yt-dlp 退出码 ' + r.code;
+      return { ok: false, error: explainCookieError(raw), raw: String(raw).slice(0, 400) };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err) };
+    }
+  });
+
+  /** 系统已安装的字体族名（用于字幕字体选择） */  ipcMain.handle('fonts:list', () => {
     try {
       return { ok: true, list: listSystemFonts() };
     } catch (err) {
@@ -612,7 +663,7 @@ function registerIpc() {
     if (!bin) return { ok: false, error: '未找到 yt-dlp.exe' };
     if (!url) return { ok: false, error: '缺少视频地址' };
     try {
-      const r = await channel.videoDetails(bin, url);
+      const r = await channel.videoDetails(bin, url, { auth: authArgs(settings) });
       return r;
     } catch (err) {
       return { ok: false, error: String((err && err.message) || err).slice(0, 300) };

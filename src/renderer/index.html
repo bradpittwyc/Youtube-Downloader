@@ -440,12 +440,28 @@
           </div>
 
           <div class="setting-row">
-            <label>Cookies 文件（会员 / 年龄限制 / 防机器人验证）</label>
+            <label>Cookies（会员 / 年龄限制 / 防机器人验证）</label>
+            <div class="inline" style="align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px">
+              <span class="muted">从浏览器读取</span>
+              <select id="setCookieBrowser" class="select-sm">
+                <option value="">不使用</option>
+              </select>
+              <button id="btnTestCookie" class="btn tiny">测试是否生效</button>
+              <span id="cookieTestResult" class="muted"></span>
+            </div>
             <div class="inline">
+              <span class="muted">或 cookies.txt</span>
               <input id="setCookieFile" type="text" placeholder="cookies.txt" spellcheck="false" />
               <button id="btnPickCookie" class="btn tiny">选择</button>
               <button id="btnClearCookie" class="btn tiny">清除</button>
             </div>
+            <small class="muted"
+              >两者都填时<b>以 cookies.txt 为准</b>。配置会作用于<b>所有</b>请求：下载、抓字幕、频道识别、视频探测。<br />
+              ⚠️ <b>Chrome / Edge 127+ 无法读取</b>——它们启用了「应用绑定加密」，第三方工具解不开（yt-dlp 已知限制）。
+              这类浏览器请改用导出 cookies.txt 的方式。<br />
+              从浏览器读取时首次需要<b>完全关闭</b>该浏览器（Cookie 库被占用会读不到）。<br />
+              配好之后<b>务必点一次「测试是否生效」</b>——YouTube 认不认要试了才知道。</small
+            >
           </div>
 
           <div class="setting-row checks">
