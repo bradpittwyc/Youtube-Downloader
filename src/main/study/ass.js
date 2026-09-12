@@ -20,7 +20,11 @@ const BASE = {
   fontZh: '微软雅黑',
   sizeEn: 50,
   sizeZh: 44,
-  outline: 3,
+  /**
+   * 描边粗细的兜底值（设置里没给、或给了负数时才用它）。
+   * 与 settings.js 的默认值保持一致：作者对比 0~5 各档后选定的 1。
+   */
+  outline: 1,
   shadow: 0,
   marginLR: 70,
   /** 中文块底边距画面底部的距离 */

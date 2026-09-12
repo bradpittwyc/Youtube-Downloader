@@ -165,7 +165,10 @@ const DEFAULTS = {
   assColorEn: '#FFFFFF', // 英文字色（白）
   assColorZh: '#FFD700', // 中文字色（琥珀）
   assOutlineColor: '#000000', // 黑描边
-  assOutlineWidth: 3, // 描边粗细（相对 1080 高度）
+  // 描边粗细（相对 1080 高度，会按视频分辨率等比缩放）。
+  // 作者对比过 0~5 各档，认为 1 最好：细描边更利落，不会把衬线体的笔画糊住。
+  // 换算：2160p → 2.0，1080p → 1.0，360p → 0.3，相对字号一律是 2%，各分辨率视觉一致。
+  assOutlineWidth: 1,
   assBorderStyle: 1, // 1=描边  3=背景框
   assShadow: 0,
   assFontScale: 1, // 整体字号缩放
