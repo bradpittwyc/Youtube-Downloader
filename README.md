@@ -168,40 +168,56 @@ $env:YTDL_DEV_EXEC=1
 
 ---
 
-## 版本回滚与重建
+## 版本备份、回滚与重建
 
-每个版本都打了 git tag（`v1.0.0` … `v1.8.2`，共 20 个）。
-**tag 才是回滚的权威依据**；`releases/` 里只是预先构建好的安装包，为了方便。
+### 备份策略：源码 + tag 在 GitHub，本地不留构建产物
 
-### 直接回退程序
+远程仓库：**https://github.com/bradpittwyc/Youtube-Downloader**（私有）
 
-```powershell
-releases\v1.7.1\YouTubeDownloader-Portable-1.7.1.exe   # 免安装，双击即用
-releases\v1.7.1\YouTubeDownloader-Setup-1.7.1.exe     # 或重新安装
-```
+每个版本都打了 git tag（`v1.0.0` … `v1.8.2`，共 20 个），**全部已推送到远程**。
+`releases/`、`dist/`、`node_modules/` 都被 `.gitignore` 排除，**不会**上传 ——
+也就是说 **GitHub 上只有源码和 tag，没有构建好的 exe**。
 
-### 回退源码
+这是有意为之：最占体积的 `resources/bin/ffmpeg.exe`(96 MB) 本身在 git 里，
+所以重建任何版本都只是「装依赖 + 打包」，约 2 分钟。为此上传上百 MB 的 exe 不划算。
 
-```bash
-git checkout v1.7.1          # 切到那个版本
-git switch -c rollback-1.7   # 或基于它开分支
-```
-
-### 重建被精简掉的版本
-
-`releases/` 只保留了几个关键版本（**v1.0.0 / v1.5.1 / v1.6.2 / v1.7.1 / v1.8.2**），
-其余 15 个已删除以节省约 4.4 GB 磁盘。它们**全部可以从 tag 重建**：
+### 重建任意版本
 
 ```powershell
-$tag = 'v1.4.1'
+$tag = 'v1.7.1'
 git worktree add ..\_rebuild $tag      # 把该版本检出到旁边目录，不动当前工作区
 cd ..\_rebuild
 npm install                            # node_modules 未被跟踪，需要装一次
 npm run dist                           # 产出 dist\*.exe
-Copy-Item dist\*.exe "..\youtubedownloader\releases\$tag\" -Force
 cd ..\youtubedownloader
 git worktree remove ..\_rebuild
 ```
+
+想省事也可以直接在临时目录 `git clone -b v1.7.1 <repo> && npm install && npm run dist`。
+
+### 回退源码
+
+```bash
+git checkout v1.7.1          # 切到那个版本（只读查看用）
+git switch -c rollback-1.7   # 或基于它开分支继续改
+```
+
+### 发版流程
+
+```powershell
+# 1. 改 package.json 的 version
+# 2. 提交
+git add -A; git commit -m "v1.9.0: ..."
+# 3. 打 tag（已配置 push.followTags=true，推送时会自动带上 tag）
+git tag -a v1.9.0 -m "v1.9.0 ..."
+git push
+# 4. 构建（产物留在 dist\，不必再归档到 releases\）
+npm run dist
+```
+
+> **注意**：`push.followTags` 只推送「指向已推送提交」的 tag。
+> 打完 tag 后务必确认 `git ls-remote --tags origin` 里有它 ——
+> 曾经踩过 `gh repo create --push` 只推分支、**20 个 tag 一个都没上去**的坑。
 
 ### 回滚时的注意事项
 
