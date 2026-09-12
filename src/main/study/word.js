@@ -76,8 +76,6 @@ function makeStyles() {
       mk('SegLabel', { font: FONT_UI, size: 18, color: GRAY }, { spacing: { before: 60, after: 30 } }),
       // 附录一的段落锚点：[3] 这样的灰色角标，方便和正文对照
       mk('AppAnchor', { font: FONT_UI, size: 18, color: GRAY }, { spacing: { before: 160, after: 30 } }),
-      // 目录表里的行
-      mk('TocCell', { font: FONT_UI, size: 18, color: '333333' }, { spacing: { line: 260, after: 0 } }),
     ],
   };
 }
@@ -129,72 +127,8 @@ async function buildStudyDocx(input) {
     children.push(new Paragraph({ style: 'MetaLine', children: runs(b, FONT_UI, { size: 18, color: GRAY }) }));
   }
 
-  // ---------- 段落导航 ----------
-  // 长文档（实测一个 77 分钟的视频有 31 段）没有目录根本翻不动。
-  // 段落少的时候目录反而是噪音，所以只在 8 段以上才加。
-  if (segments.length >= 8) {
-    children.push(
-      new Paragraph({
-        style: 'SegHeading',
-        children: [new TextRun({ text: '本节目录', font: FONT_UI, size: 26, bold: true, color: ACCENT })],
-      })
-    );
-    const navCell = (text, o) =>
-      new TableCell({
-        margins: { top: 30, bottom: 30, left: 100, right: 100 },
-        shading: o && o.fill ? { type: ShadingType.CLEAR, fill: o.fill } : undefined,
-        children: [
-          new Paragraph({
-            style: 'TocCell',
-            children: [
-              new TextRun({
-                text: String(text == null ? '' : text),
-                font: FONT_UI,
-                size: 18,
-                bold: !!(o && o.bold),
-                color: (o && o.color) || '333333',
-              }),
-            ],
-          }),
-        ],
-      });
-    const navRows = [
-      new TableRow({
-        tableHeader: true,
-        children: [
-          navCell('段落', { bold: true, fill: 'F2F3F4' }),
-          navCell('主题', { bold: true, fill: 'F2F3F4' }),
-          navCell('时间码', { bold: true, fill: 'F2F3F4' }),
-        ],
-      }),
-    ];
-    for (const seg of segments) {
-      navRows.push(
-        new TableRow({
-          children: [
-            navCell(String(seg.index)),
-            navCell(seg.topic || ''),
-            navCell(seg.startMs != null ? tc(seg.startMs) : '', { color: GRAY }),
-          ],
-        })
-      );
-    }
-    children.push(
-      new Table({
-        width: { size: 100, type: WidthType.PERCENTAGE },
-        borders: {
-          top: { style: BorderStyle.SINGLE, size: 2, color: 'E5E7E9' },
-          bottom: { style: BorderStyle.SINGLE, size: 2, color: 'E5E7E9' },
-          left: { style: BorderStyle.SINGLE, size: 2, color: 'E5E7E9' },
-          right: { style: BorderStyle.SINGLE, size: 2, color: 'E5E7E9' },
-          insideHorizontal: { style: BorderStyle.SINGLE, size: 2, color: 'EFEFEF' },
-          insideVertical: { style: BorderStyle.SINGLE, size: 2, color: 'EFEFEF' },
-        },
-        columnWidths: [900, 6600, 1600],
-        rows: navRows,
-      })
-    );
-  }
+  // 顺序：本节目录（作者明确不要，已删除）→ Takeaways → 正文
+
 
   // ---------- Takeaways：全文要点（紧跟在频道/时长/上传/链接下面）----------
   const takeaways = input.takeaways || [];
@@ -309,16 +243,24 @@ async function buildStudyDocx(input) {
     children.push(
       new Paragraph({
         style: 'MetaLine',
-        children: runs(`共 ${vocab.length} 个词条，按在本文中出现的段落数排序`, FONT_UI, { size: 18, color: GRAY }),
+        children: runs(`共 ${vocab.length} 个词条，按在视频中出现的频率排序`, FONT_UI, { size: 18, color: GRAY }),
       })
     );
 
+    /**
+     * 表格单元格。
+     * @param {string} text
+     * @param {object} o { bold, ui, fill, align }
+     *   align：标题一律居中；正文里短列（音标/词性）居中，长文本列（词汇/释义）左对齐——
+     *   长文本居中会参差不齐，反而难读。
+     */
     const cell = (text, o) =>
       new TableCell({
         margins: { top: 50, bottom: 50, left: 100, right: 100 },
         shading: o && o.fill ? { type: ShadingType.CLEAR, fill: o.fill } : undefined,
         children: [
           new Paragraph({
+            alignment: o && o.align ? o.align : AlignmentType.LEFT,
             children: [
               new TextRun({
                 text: String(text == null ? '' : text),
@@ -331,19 +273,19 @@ async function buildStudyDocx(input) {
         ],
       });
 
+    const HEAD = { bold: true, ui: true, fill: 'F2F3F4', align: AlignmentType.CENTER };
     const header = new TableRow({
       tableHeader: true,
-      children: ['词汇', '音标', '词性', '释义', '段数'].map((t) => cell(t, { bold: true, ui: true, fill: 'F2F3F4' })),
+      children: ['词汇', '音标', '词性', '释义'].map((t) => cell(t, HEAD)),
     });
     const rows = vocab.map(
       (v) =>
         new TableRow({
           children: [
             cell(v.word, { bold: true }),
-            cell(v.phonetic || ''),
-            cell(v.pos || ''),
+            cell(v.phonetic || '', { align: AlignmentType.CENTER }),
+            cell(v.pos || '', { align: AlignmentType.CENTER }),
             cell(v.def || ''),
-            cell(String(v.count || 1)),
           ],
         })
     );
@@ -359,7 +301,8 @@ async function buildStudyDocx(input) {
           insideHorizontal: { style: BorderStyle.SINGLE, size: 2, color: 'E5E7E9' },
           insideVertical: { style: BorderStyle.SINGLE, size: 2, color: 'E5E7E9' },
         },
-        columnWidths: [2400, 1900, 900, 4900, 900],
+        // 去掉「段数」列后把宽度分给词汇和释义，避免音标被挤断行
+        columnWidths: [2600, 1800, 900, 5700],
         rows: [header].concat(rows),
       })
     );
