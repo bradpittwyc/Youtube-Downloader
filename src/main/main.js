@@ -152,8 +152,14 @@ function channelCacheFile(base) {
   return path.join(paths.cacheDir(), `${h}.json`);
 }
 
-/** 磁盘缓存超过这个时长就认为「旧了」，需要后台刷一次 */
-const CHANNEL_CACHE_FRESH_MS = 30 * 60 * 1000;
+/**
+ * 频道列表的有效期：**一天内抓过就绝不再抓**。
+ *
+ * 为什么是一天而不是几分钟：频道的视频列表不会几分钟就变，
+ * 而重新枚举一个频道要十几秒、几十个请求，还可能撞上 YouTube 风控。
+ * 需要立刻拿最新列表时，用户点「重新抓取」即可（那条路会绕过这里）。
+ */
+const CHANNEL_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function saveChannelCache(file, data) {
   try {
@@ -189,8 +195,11 @@ function finishChannelData(data, target, skey) {
 /**
  * 后台静默刷新（stale-while-revalidate 的 revalidate 那一半）。
  *
- * 为什么需要：磁盘缓存超过 30 分钟就直接重新联网抓，用户每次点回主页的频道都要干等，
+ * 为什么需要：缓存过期时如果直接重新联网抓，用户每次点回主页的频道都要干等，
  * 而绝大多数时候列表根本没变。改成先把旧列表秒给用户，再悄悄抓一遍最新的，抓完推给界面替换。
+ *
+ * 注意生效时机：只有缓存超过 CHANNEL_CACHE_TTL_MS（一天）才会走到这里 ——
+ * 一天内点进来是纯读缓存，连后台请求都不发。
  */
 let bgRefresh = null; // { key, canceled }
 
@@ -282,7 +291,7 @@ function listSystemFonts() {
 
 /**
  * 本次运行内已抓取过的频道 / 播放列表（内存缓存，【无过期时间】）。
- * 磁盘缓存有 30 分钟 TTL，超过就重新抓；这里保证「本次打开程序抓过一次，
+ * 磁盘缓存有 CHANNEL_CACHE_TTL_MS（一天）的有效期；这里保证「本次打开程序抓过一次，
  * 之后再回来切换就绝不再抓」——多个博主之间来回切换是秒开的。
  * 用户点「重新抓取」时仍然会绕过它。
  */
@@ -587,10 +596,11 @@ function registerIpc() {
           const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
           const age = Date.now() - (cached.ts || 0);
           if (cached.data) {
-            // 【关键】不再用 30 分钟卡住返回值 —— 多旧都先给出去，让用户秒开。
-            // 旧的只是「可能过期」，后台补一次就行，不该让用户干等。
+            // 【关键】不用有效期卡住返回值 —— 多旧都先给出去，让用户秒开。
+            // 旧的只是「可能过期」，补齐就行，不该让用户干等。
             if (skey) sessionCache.set(skey, { ts: Date.now(), data: cached.data });
-            const stale = age >= CHANNEL_CACHE_FRESH_MS;
+            // 一天内抓过就纯读缓存，连后台请求都不发；超过一天才顺手补一次
+            const stale = age >= CHANNEL_CACHE_TTL_MS;
             if (stale) {
               send({ phase: 'cache', label: '先用上次的列表，正在后台更新…' });
               startBackgroundRefresh({ target, input, skey, cacheFile, bin, settings });
@@ -904,7 +914,7 @@ function registerIpc() {
  * 回填频道分类（书签分组用）。
  *
  * 分类需要视频标题，而只有识别时才拿得到；老记录（分类功能上线前建的书签）没有。
- * 好在频道缓存的 30 分钟列表里就存着标题，直接拿来补，不用重新联网识别。
+ * 好在频道缓存里就存着标题，直接拿来补，不用重新联网识别。
  * 每次启动都跑：只处理「还没分类」的，成本是读几个 JSON。
  */
 function backfillCategories() {

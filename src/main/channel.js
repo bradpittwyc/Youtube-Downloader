@@ -316,7 +316,7 @@ async function enumerateChannel(bin, channelBase, opts = {}) {
  *
  * 用有限并发（默认 3）：实测 @OpenAI 有 58 个播放列表，串行展开要一分多钟；
  * 但并发太高又容易触发 YouTube「Sign in to confirm you're not a bot」的风控，取个折中。
- * 识别结果有 30 分钟缓存，所以同样的频道重复识别不会再发这些请求。
+ * 识别结果有一天的缓存，所以同样的频道重复识别不会再发这些请求。
  */
 async function expandContainers(bin, containers, sec, ctx) {
   const { result, byId, maxItems, onProgress, onChild, concurrency, auth } = ctx;

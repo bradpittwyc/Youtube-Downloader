@@ -242,7 +242,7 @@ function rendersWarnings() {
   // 「该频道没有 XX 标签页」不显示：大部分频道本来就没有 Podcasts / Live，
   // 挂在列表上方只是一排噪音。tabStatus 里仍然记着缺失状态，分类标签照常用。
   //
-  // 注意：这里必须过滤，不能只改产生它的地方 —— 频道缓存（30 分钟磁盘缓存 + 会话缓存）
+  // 注意：这里必须过滤，不能只改产生它的地方 —— 频道缓存（磁盘缓存 + 会话缓存）
   // 里已经存了旧数据带的这些警告，那些频道走的是"直接用缓存"，根本不会重新生成。
   const w = ((state.data && state.data.warnings) || []).filter(
     (x) => !(x.level === 'info' || /没有[\s\S]*标签页/.test(String(x.message || '')))
