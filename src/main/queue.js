@@ -491,6 +491,8 @@ class DownloadQueue extends EventEmitter {
         studyDocPath: it.studyDocPath || '',
         biSrtPath: it.biSrtPath || '',
         assPath: it.assPath || '',
+        quoteCardDir: it.quoteCardDir || '',
+        quoteCardCount: it.quoteCardCount || 0,
         studyError: it.studyError || '',
         studySummary: it.studySummary || '',
         studyStage: it.studyStage || '',
@@ -1334,6 +1336,8 @@ class DownloadQueue extends EventEmitter {
       item.studyDocPath = res.paths.docx || '';
       item.biSrtPath = res.paths.bilingualSrt || '';
       item.assPath = res.paths.ass || '';
+      item.quoteCardDir = res.paths.quoteCards || '';
+      item.quoteCardCount = res.paths.quoteCardCount || 0;
       item.studyFromCache = !!res.fromCache;
       item.studySummary = res.summary;
       item.studyError = '';
@@ -1358,6 +1362,9 @@ class DownloadQueue extends EventEmitter {
     if ((item.subPaths || []).length) bits.push(`${item.subPaths.length} 个字幕`);
     if (item.assPath) bits.push('双语ASS');
     if (item.studyDocPath) bits.push('学习文档');
+    // 金句卡片现在随文档自动产出，在阶段文字里体现出来，
+    // 否则用户不知道图片在哪、还会去找那个已经删掉的按钮
+    if (item.quoteCardCount) bits.push(`${item.quoteCardCount} 张金句图`);
     return bits.length > 1 ? `已完成（${bits.join(' + ')}）` : '已完成';
   }
 

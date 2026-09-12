@@ -117,6 +117,18 @@ function estimateTokens(cues) {
 }
 
 /**
+ * 字幕指纹：条数 + 首尾文本。
+ * 断点续跑时用它确认「还是同一份字幕」—— 字幕变了就不能复用上次的分段计划，
+ * 否则段落区间会和实际内容对不上。
+ */
+function cuesFingerprint(cues) {
+  if (!cues || !cues.length) return '0';
+  const a = String(cues[0].text || '').slice(0, 40);
+  const b = String(cues[cues.length - 1].text || '').slice(0, 40);
+  return `${cues.length}|${a}|${b}`;
+}
+
+/**
  * 执行完整流水线。
  * @param {object} o
  * @param {string} o.srtPath      英文字幕路径
@@ -126,10 +138,13 @@ function estimateTokens(cues) {
  * @param {number} [o.concurrency]
  * @param {number} [o.maxSegCues]
  * @param {number} [o.maxCues]    只处理前 N 条（调试用）
+ * @param {object} [o.resume]     上次中断时的中间结果（见 partialState）
+ * @param {function} [o.onPartial] 每翻完一段回调一次，调用方负责落盘
  */
 async function runStudyPipeline(o) {
   const cfg = o.cfg;
   const onProgress = o.onProgress || (() => {});
+  const onPartial = o.onPartial || null;
   const concurrency = Math.max(1, Math.min(6, o.concurrency || DEFAULT_CONCURRENCY));
   const maxSegCues = o.maxSegCues || DEFAULT_MAX_SEG_CUES;
   const usage = { prompt: 0, completion: 0, calls: 0, repairs: 0, splits: 0 };
@@ -139,6 +154,8 @@ async function runStudyPipeline(o) {
   let work = loaded.cues;
   if (o.maxCues > 0 && work.length > o.maxCues) work = work.slice(0, o.maxCues);
   if (!work.length) throw new Error('字幕清洗后没有任何内容');
+
+  const cuesFp = cuesFingerprint(work);
 
   // ---------- 第一遍：结构分析 ----------
   onProgress({ phase: 'structure', done: 0, total: 1, label: '分析内容结构' });
@@ -150,8 +167,40 @@ async function runStudyPipeline(o) {
   let plan = null;
   let struct = { takeaways: [], quotes: [] };
   let lastErrs = null;
+  /** 续跑复用：plan 下标 → 已完成的结果 */
+  const resumed = new Map();
+  let planMoved = 0;
+  let planSplit = 0;
+  /** 计划是否已经是「最终形态」（续跑时是，重新生成时还要经过吸附与拆分） */
+  let planIsFinal = false;
 
-  for (let attempt = 1; attempt <= 3 && !plan; attempt++) {
+  // 断点续跑：上次的中间结果如果对得上（同一份字幕、同一份计划），直接接着跑。
+  // 这里复用的是【最终形态】的计划（已经过句末吸附与大段拆分），
+  // 所以下面必须跳过那两个变换 —— 再变换一次会得到完全不同的段落划分，
+  // 已翻好的段落就对不上了。
+  if (o.resume && o.resume.cuesFp === cuesFp && Array.isArray(o.resume.plan) && o.resume.plan.length) {
+    const rp = o.resume;
+    if (llm.validatePlan(rp.plan, work.length).length === 0) {
+      plan = rp.plan.map((p) => Object.assign({}, p));
+      planIsFinal = true;
+      planMoved = Number(rp.planMoved) || 0;
+      planSplit = Number(rp.planSplit) || 0;
+      if (rp.struct && ((rp.struct.takeaways || []).length || (rp.struct.quotes || []).length)) {
+        struct = { takeaways: rp.struct.takeaways || [], quotes: rp.struct.quotes || [] };
+      }
+      for (const [k, v] of Object.entries(rp.segments || {})) {
+        const i = Number(k);
+        if (Number.isInteger(i) && i >= 0 && i < plan.length && v) resumed.set(i, v);
+      }
+      usage.resumed = resumed.size;
+      console.log(`[study] 断点续跑：复用上次的分段计划，已完成 ${resumed.size}/${plan.length} 段`);
+    } else {
+      console.log('[study] 上次的中间结果与当前字幕对不上，重新开始');
+    }
+  }
+
+  // 续跑时 plan 已经就位（且已是最终形态），整段跳过结构分析 —— 省一次调用
+  for (let attempt = 1; !plan && attempt <= 3; attempt++) {
     // 重试时把「上一次哪里不合格」告诉模型，否则同样的输入只会得到同样的错
     const userContent = lastErrs
       ? `${structInput}\n\n【上一次的输出不合格】\n${lastErrs.slice(0, 6).join('\n')}\n请针对以上问题修正后，重新输出完整 JSON。`
@@ -201,21 +250,70 @@ async function runStudyPipeline(o) {
     console.warn('[study] 模型未给出可用分段计划，改用均分兜底');
   }
 
-  // 边界吸附
-  const snapped = snapPlanToSentences(plan, work);
-  if (snapped.moved > 0 && llm.validatePlan(snapped.plan, work.length).length === 0) {
-    plan = snapped.plan;
-  }
-  // 大段切分
-  const sized = splitOversizedSegments(plan, work, maxSegCues);
-  if (sized.splitCount > 0 && llm.validatePlan(sized.plan, work.length).length === 0) {
-    plan = sized.plan;
+  // 边界吸附 + 大段切分。
+  // 【续跑时必须跳过】——上次存的计划已经是这一步之后的最终形态，
+  // 再变换一次会得到完全不同的段落划分，已翻好的段落就对不上了。
+  let snappedMoved = planMoved;
+  let splitCount = planSplit;
+  if (!planIsFinal) {
+    const snapped = snapPlanToSentences(plan, work);
+    if (snapped.moved > 0 && llm.validatePlan(snapped.plan, work.length).length === 0) {
+      plan = snapped.plan;
+      snappedMoved = snapped.moved;
+    }
+    const sized = splitOversizedSegments(plan, work, maxSegCues);
+    if (sized.splitCount > 0 && llm.validatePlan(sized.plan, work.length).length === 0) {
+      plan = sized.plan;
+      splitCount = sized.splitCount;
+    }
   }
 
   // ---------- 第二遍：逐段精加工 ----------
   const results = new Array(plan.length).fill(null);
   let cursor = 0;
-  let done = 0;
+
+  // 续跑：把上次翻好的段落填回去（只存了必要字段，_seg/_cues/_expected 在此重建，
+  // 这样中间文件小得多，也不会因为字幕内容被写两遍而膨胀）
+  for (const [i, v] of resumed) {
+    const seg = plan[i];
+    if (!seg) continue;
+    results[i] = Object.assign({}, v, {
+      _seg: seg,
+      _cues: work.slice(seg.from - 1, seg.to),
+      _expected: Array.from({ length: seg.to - seg.from + 1 }, (_, k) => seg.from + k),
+    });
+  }
+  let done = resumed.size;
+
+  /** 把当前进度交给调用方落盘（只带必要字段） */
+  function emitPartial() {
+    if (!onPartial) return;
+    const segs = {};
+    results.forEach((r, i) => {
+      if (!r || r._failed) return;
+      segs[i] = {
+        en: r.en,
+        zh: r.zh,
+        notes: r.notes || [],
+        vocab: r.vocab || [],
+        cues: r.cues || [],
+      };
+    });
+    try {
+      onPartial({
+        cuesFp,
+        plan,
+        struct,
+        segments: segs,
+        planMoved: snappedMoved,
+        planSplit: splitCount,
+        done: Object.keys(segs).length,
+        total: plan.length,
+      });
+    } catch (err) {
+      console.error('[study] 写中间结果失败:', err && err.message);
+    }
+  }
 
   async function translateSeg(seg, contextText, depth) {
     const segCues = work.slice(seg.from - 1, seg.to);
@@ -312,15 +410,24 @@ async function runStudyPipeline(o) {
     while (true) {
       const idx = cursor++;
       if (idx >= plan.length) return;
+      // 续跑：这一段上次已经翻好了，直接跳过（不调用模型、不花钱）。
+      // 【不要 done++】—— done 已经初始化成 resumed.size，再自增就会重复计数，
+      // 界面上会看到「15/14」「20/14」这种超出总数的进度（实测踩过）。
+      if (results[idx]) {
+        continue;
+      }
       const seg = plan[idx];
       const ctx = await contextFor(idx);
       const r = await translateSeg(seg, ctx, 0);
       results[idx] = r.ok ? r.data : { _failed: r.error, _seg: seg };
       done++;
       onProgress({ phase: 'translate', done, total: plan.length, label: seg.topic });
+      // 每翻完一段就把进度交给调用方落盘 —— 中途被杀掉也不至于全部重来
+      emitPartial();
     }
   }
-  onProgress({ phase: 'translate', done: 0, total: plan.length, label: '开始翻译' });
+  // 续跑时进度从 resumed.size 起算，这里要把「已经翻好的」也算进去
+  onProgress({ phase: 'translate', done: resumed.size, total: plan.length, label: resumed.size ? '继续上次的进度' : '开始翻译' });
   await Promise.all(Array.from({ length: concurrency }, worker));
 
   // ---------- 汇总 ----------
@@ -382,8 +489,10 @@ async function runStudyPipeline(o) {
       segments: segments.length,
       failedSegments: failed.length,
       elapsedMs: Date.now() - t0,
-      planMoved: snapped.moved,
-      planSplit: sized.splitCount,
+      planMoved: snappedMoved,
+      planSplit: splitCount,
+      /** 断点续跑复用了多少段（0 表示这次是全新的） */
+      resumedSegments: resumed.size,
     }),
     usage,
   };
@@ -493,6 +602,7 @@ module.exports = {
   splitOversizedSegments,
   estimateTokens,
   summarize,
+  cuesFingerprint,
   DEFAULT_MAX_SEG_CUES,
   DEFAULT_CONCURRENCY,
 };

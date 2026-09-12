@@ -16,6 +16,7 @@ const llm = require('./llm');
 const secret = require('./secret');
 const { runStudyPipeline, runSummaryOnly, estimateTokens, summarize } = require('./pipeline');
 const { buildStudyDocx } = require('./word');
+const quoteCard = require('./quote-card');
 
 /**
  * 写文件，并把人话讲清楚被占用的错误。
@@ -139,8 +140,66 @@ function readCache(videoId, srtPath, model, opts) {
   }
 }
 
-/** 统一构造缓存内容，避免两处写入字段不一致 */
-function cachePayload(cfg, res) {
+// ---------------------------------------------------------------- 中间结果（断点续跑）
+//
+// 逐段翻译是整个流水线里最贵的一步（一个 93 段的视频约 ¥0.68、十几分钟）。
+// 以前只在全部跑完之后才写缓存，所以进程中途被杀（关 App、打包、系统更新）
+// 就把已经翻好的段落全丢了，下次从 0 重来、重新花钱。
+//
+// 这里把中间结果单独落一份文件：每翻完一段就更新，跑完后再删掉。
+// 它记录的是【最终形态】的分段计划（已过句末吸附与大段拆分），
+// 续跑时直接复用这份计划 + 已完成的段落，于是只翻剩下的。
+
+function partialKey(videoId, srtPath) {
+  return cacheKey(videoId, srtPath).replace(/\.json$/, '.partial.json');
+}
+
+function readPartial(videoId, srtPath, model) {
+  try {
+    const f = partialKey(videoId, srtPath);
+    if (!fs.existsSync(f)) return null;
+    const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+    if (j.model !== model) return null;
+    if (j.promptVersion !== llm.PROMPT_VERSION) return null;
+    if (!Array.isArray(j.plan) || !j.plan.length) return null;
+    if (!j.segments || !Object.keys(j.segments).length) return null;
+    return j;
+  } catch (_) {
+    return null;
+  }
+}
+
+function writePartial(videoId, srtPath, cfg, state) {
+  try {
+    fs.writeFileSync(
+      partialKey(videoId, srtPath),
+      JSON.stringify({
+        ts: Date.now(),
+        model: cfg.model,
+        promptVersion: llm.PROMPT_VERSION,
+        cuesFp: state.cuesFp,
+        plan: state.plan,
+        struct: state.struct,
+        segments: state.segments,
+        planMoved: state.planMoved,
+        planSplit: state.planSplit,
+        done: state.done,
+        total: state.total,
+      })
+    );
+  } catch (err) {
+    console.error('[study] 写中间结果失败:', err && err.message);
+  }
+}
+
+function deletePartial(videoId, srtPath) {
+  try {
+    const f = partialKey(videoId, srtPath);
+    if (fs.existsSync(f)) fs.unlinkSync(f);
+  } catch (_) {}
+}
+
+/** 统一构造缓存内容，避免两处写入字段不一致 */function cachePayload(cfg, res) {
   return {
     ts: Date.now(),
     model: cfg.model,
@@ -231,14 +290,38 @@ async function generateForVideo(o) {
     if (!isConfigured(cfg)) {
       throw new Error('尚未配置大模型 API（请在设置里填写 Base URL、API Key 与模型名）');
     }
+    // 断点续跑：上次没跑完就接着跑，只翻缺的那些段，不重复花钱。
+    // force 时忽略中间结果（用户明确要求重来）。
+    const partial = o.force ? null : readPartial(o.videoId, o.srtPath, cfg.model);
+    if (partial) {
+      const n = Object.keys(partial.segments || {}).length;
+      console.log(`[study] 发现上次的中间结果：已完成 ${n}/${partial.plan.length} 段，继续`);
+    }
+    // 进度写盘做节流：每段都写会产生很多次磁盘 IO（文件最终几百 KB），
+    // 但最后一段必须写进去，否则「就差最后一段」时被杀会白翻。
+    let lastWrite = 0;
+    let pending = null;
     res = await runStudyPipeline({
       srtPath: o.srtPath,
       cfg,
       onProgress,
       concurrency: Number(settings.studyConcurrency) || 3,
       maxSegCues: Number(settings.studyMaxSegCues) || 45,
+      resume: partial,
+      onPartial: (st) => {
+        pending = st;
+        const now = Date.now();
+        const isLast = st.done >= st.total;
+        if (!isLast && now - lastWrite < 1500) return;
+        lastWrite = now;
+        pending = null;
+        writePartial(o.videoId, o.srtPath, cfg, st);
+      },
     });
+    if (pending) writePartial(o.videoId, o.srtPath, cfg, pending);
     writeCache(o.videoId, o.srtPath, cachePayload(cfg, res));
+    // 全文跑完了，中间结果没用了（留着只会让下次误判成「还没跑完」）
+    deletePartial(o.videoId, o.srtPath);
   }
 
   const paths = derivePaths(o.videoPath, o.srtPath);
@@ -321,13 +404,44 @@ async function generateForVideo(o) {
       },
     });
     writeFileSafe(paths.docx, buf);
-    wrote.docx = paths.docx;  }
+    wrote.docx = paths.docx;
+  }
+
+  // ---- 金句卡片 ----
+  // 以前要在队列里点「金句图」按钮才生成，作者要求改成自动产出：
+  // 文档里既然已经有金句，顺手渲染成图片就行，不用再按一次。
+  // 单独 try/catch —— 渲染卡片依赖 Electron 窗口，万一失败也绝不能连累文档。
+  const quotes = res.quotes || [];
+  if (quotes.length) {
+    onProgress({ phase: 'write', done: 3, total: 4, label: '渲染金句卡片' });
+    try {
+      const base = o.videoPath
+        ? String(o.videoPath).replace(/\.[^.\\/]+$/, '')
+        : path.join(settings.outputDir || '', String(o.videoId || '').replace(/[\\/:*?"<>|]/g, '_'));
+      const outDir = `${base}.金句卡片`;
+      const r = await quoteCard.renderQuoteCards({
+        quotes,
+        meta: { title: (o.meta && o.meta.title) || '', channel: (o.meta && o.meta.channel) || '', url: (o.meta && o.meta.url) || '' },
+        outDir,
+        accent: settings.assColorZh || '#FFD166',
+      });
+      if (r.ok) {
+        wrote.quoteCards = r.dir;
+        wrote.quoteCardCount = r.files.length;
+      } else {
+        console.warn('[study] 金句卡片未生成:', r.error);
+      }
+    } catch (err) {
+      console.error('[study] 金句卡片渲染失败:', err && err.message);
+    }
+  }
 
   return {
     paths: wrote,
     fromCache,
     segments: res.segments,
     vocab: res.vocab || [],
+    quotes,
     failed: res.failed || [],
     stats: res.stats,
     usage: res.usage,
@@ -342,16 +456,6 @@ function clearCache(videoId, srtPath) {
   } catch (_) {}
 }
 
-/**
- * 取出某个视频已生成的金句（做金句卡片用）。
- * 金句只存在学习缓存里，不需要重新调用大模型。
- * allowStale：即使提示词版本升级过，旧缓存里的金句照样能用。
- */
-function readQuotesFor(videoId, srtPath, model) {
-  const j = readCache(videoId, srtPath, model, { allowStale: true });
-  return (j && Array.isArray(j.quotes) ? j.quotes : []).filter((q) => q && (q.en || q.zh));
-}
-
 module.exports = {
   generateForVideo,
   estimateFor,
@@ -361,5 +465,4 @@ module.exports = {
   clearCache,
   writeFileSafe,
   probeVideoSize,
-  readQuotesFor,
 };

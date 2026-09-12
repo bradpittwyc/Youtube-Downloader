@@ -96,7 +96,7 @@ contextBridge.exposeInMainWorld('api', {
     estimate: (payload) => ipcRenderer.invoke('study:estimate', payload),
     generate: (key, force) => ipcRenderer.invoke('study:generate', { key, force }),
     keyInfo: () => ipcRenderer.invoke('study:key-info'),
-    quoteCards: (key) => ipcRenderer.invoke('study:quote-cards', { key }),
+    // 金句卡片已改为生成文档时自动产出，不再有单独的入口
   },
 
   shell: {

@@ -735,8 +735,7 @@ function renderQueue() {
     }
     if (q.studyDocPath) {
       buttons.push(['redoDoc', '重做', '重新生成（走翻译缓存，不产生 API 费用；按住 Ctrl 可强制重新翻译）']);
-      // 金句来自学习文档的分析结果，所以只有生成过文档的任务才有这个入口
-      buttons.push(['quoteCards', '金句图', '把文档里的金句渲染成图片，方便存手机或分享']);
+      // 金句卡片已经在生成文档时自动产出，不再单独给按钮
     } else if ((q.status === 'done' || q.status === 'skipped') && q.fileExists !== false) {
       // 注意：这里【不能】用 subCount > 0 做条件。
       // 字幕数量是下载时记下的，可能因为文件名截断之类的原因漏记（实测踩过），
@@ -1565,22 +1564,6 @@ function bind() {
       const r = await api.study.generate(key, force);
       if (r.ok) toast(r.fromCache ? '已用翻译缓存重新排版完成' : '学习文档生成完成', 'ok', 6000);
       else toast('生成失败：' + r.error, 'err', 9000);
-      return;
-    }
-    if (act === 'quoteCards') {
-      btn.disabled = true;
-      toast('正在渲染金句卡片…', 'ok', 2000);
-      try {
-        const r = await api.study.quoteCards(key);
-        if (r && r.ok) {
-          toast(`已生成 ${r.files.length} 张金句卡片`, 'ok', 6000);
-          api.shell.openPath(r.dir); // 直接打开文件夹，省得用户自己去找
-        } else {
-          toast('生成失败：' + ((r && r.error) || '未知错误'), 'err', 9000);
-        }
-      } finally {
-        btn.disabled = false;
-      }
       return;
     }
     await api.queue.action(key, act);
