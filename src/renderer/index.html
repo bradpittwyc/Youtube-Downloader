@@ -331,8 +331,17 @@
               <input id="setAssOutlineWidth" type="number" min="0" max="8" step="0.5" />
             </div>
             <div class="inline color-row">
+              <span class="muted">英文字体</span>
+              <input id="setAssFontEn" type="text" list="fontList" class="font-input" spellcheck="false" placeholder="Times New Roman" />
+              <span class="muted">中文字体</span>
+              <input id="setAssFontZh" type="text" list="fontList" class="font-input" spellcheck="false" placeholder="微软雅黑" />
+            </div>
+            <datalist id="fontList"></datalist>
+            <div class="inline color-row">
               <span class="muted">字号缩放</span>
               <input id="setAssFontScale" type="number" min="0.5" max="2" step="0.1" />
+              <span class="muted" title="0 = 播放器自然排版（间距偏大）；越负越紧凑，把英文往下拉">中英行距</span>
+              <input id="setAssLineGap" type="number" min="-0.5" max="0.6" step="0.05" />
               <span class="muted">英文每行字符</span>
               <input id="setAssWrapEn" type="number" min="20" max="80" step="2" />
               <span class="muted">中文每行字数</span>
@@ -340,6 +349,8 @@
             </div>
             <small class="muted"
               >分辨率自动探测并把字号/描边按比例缩放（横屏 1080p 与竖屏 Shorts 各适配一套）。<br />
+              中英行距单位是「英文字号」的倍数，默认 -0.2（把英文往下拉、贴紧中文）；填 0 回到播放器自然间距。<br />
+              字体可从系统已安装字体里选，也可以直接输入字体名（中文名如「微软雅黑」libass 同样认）。<br />
               用 PotPlayer / VLC / MPV 播放效果最佳；Windows 自带播放器不支持 ASS 样式。</small
             >
           </div>

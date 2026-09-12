@@ -151,6 +151,39 @@ function channelCacheFile(base) {
 // ---------------------------------------------------------------- IPC
 
 /**
+ * 读取系统已安装的字体族名，供字幕字体选择使用。
+ *
+ * 用 .NET 的 InstalledFontCollection 而不是读注册表：
+ * 注册表里的值名是「Microsoft YaHei & Microsoft YaHei UI (TrueType)」这种合并串，
+ * 拆起来容易出错，而且中文系统下部分中文字体根本不在 HKLM 那一项里（实测漏掉微软雅黑、宋体）。
+ */
+function listSystemFonts() {
+  const { execFileSync } = require('child_process');
+  const ps = [
+    '$ErrorActionPreference="SilentlyContinue"',
+    'Add-Type -AssemblyName System.Drawing',
+    '(New-Object System.Drawing.Text.InstalledFontCollection).Families | ForEach-Object { $_.Name }',
+  ].join('; ');
+  let out = '';
+  try {
+    out = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', ps], {
+      encoding: 'utf8',
+      windowsHide: true,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+  } catch (_) {
+    return [];
+  }
+  const set = new Set();
+  for (let line of out.split(/\r?\n/)) {
+    const name = line.trim();
+    if (!name || name.length > 50) continue;
+    set.add(name);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+}
+
+/**
  * 本次运行内已抓取过的频道 / 播放列表（内存缓存，【无过期时间】）。
  * 磁盘缓存有 30 分钟 TTL，超过就重新抓；这里保证「本次打开程序抓过一次，
  * 之后再回来切换就绝不再抓」——多个博主之间来回切换是秒开的。
@@ -520,6 +553,15 @@ function registerIpc() {
       if (fs.existsSync(file)) fs.unlinkSync(file);
     } catch (_) {}
     return true;
+  });
+
+  /** 系统已安装的字体族名（用于字幕字体选择） */
+  ipcMain.handle('fonts:list', () => {
+    try {
+      return { ok: true, list: listSystemFonts() };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err), list: [] };
+    }
   });
 
   // ---- 最近下载的博主（首页快捷入口）----

@@ -130,6 +130,14 @@ const DEFAULTS = {
   assBorderStyle: 1, // 1=描边  3=背景框
   assShadow: 0,
   assFontScale: 1, // 整体字号缩放
+  /** 字幕字体：英文用衬线体更适合阅读，中文用雅黑保证字形完整 */
+  assFontEn: 'Times New Roman',
+  assFontZh: '微软雅黑',
+  /**
+   * 中英之间的额外行距，单位是英文字号的倍数。
+   * 0 = libass 自然排版（间距恒等于英文下伸部空间，偏大）；负值把英文往下拉。
+   */
+  assLineGap: -0.2,
   assWrapEnChars: 44,
   assWrapZhChars: 22,
   /** 价格（元 / 百万 token），仅用于费用预估显示 */

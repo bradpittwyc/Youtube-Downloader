@@ -17,14 +17,21 @@ const BASE_RES_Y = 1080; // 下列基准值都是针对 PlayResY = 1080 调的
 
 const BASE = {
   fontEn: 'Times New Roman',
-  fontZh: 'Microsoft YaHei',
+  fontZh: '微软雅黑',
   sizeEn: 50,
   sizeZh: 44,
   outline: 3,
   shadow: 0,
   marginLR: 70,
-  /** 整个双语块距底部的距离（中英合并成一个事件，所以只要一个值） */
+  /** 中文块底边距画面底部的距离 */
   marginV: 48,
+  /**
+   * 中英之间的额外行距，单位是英文字号的倍数。
+   * 0 = libass 自然排版（间距恒等于英文的下伸部空间，实测偏大）；
+   * 负值把英文往下拉。默认 -0.20：实测在 1080p / 竖屏 1920 下都明显收紧，
+   * 且带下伸部的字母（g/y/p）仍不会碰到中文。
+   */
+  lineGap: -0.2,
   wrapEnChars: 44,
   wrapZhChars: 22,
 };
@@ -57,6 +64,10 @@ function fmtAssTime(ms) {
  */
 function escAss(text) {
   return String(text == null ? '' : text)
+    // 先把 ASS 的转义序列还原成它本来的字符，再删反斜杠。
+    // 顺序很重要：YouTube 会把消音占位 [ __ ] 转义成 [\h__\h]（\h 是硬空格），
+    // 直接删反斜杠会变成 [h__h] 这种垃圾（实测踩过，一条视频里有 200 多处）。
+    .replace(/\\[hNn]/g, ' ')
     .replace(/\{/g, '｛')
     .replace(/\}/g, '｝')
     .replace(/\\/g, '')
@@ -187,6 +198,8 @@ function buildAss(o) {
   const sizeZh = S(BASE.sizeZh);
   const fontEn = opt.fontEn || BASE.fontEn;
   const fontZh = opt.fontZh || BASE.fontZh;
+  /** 中文块底边距画面底部的距离（事件用 \pos 定位，这个值只在样式里留作兜底） */
+  const marginV = S(BASE.marginV);
 
   // 只定义一个样式（中英合并成同一个事件，见下方说明），差异全部靠行内标签覆盖
   const styleBi = [
@@ -245,8 +258,25 @@ function buildAss(o) {
   // （实测踩过：无论怎么调 MarginV，中文都跑到英文上面去，因为位置由防重叠算法接管了）。
   // 合并成一个事件后，中英作为一个整体被定位，绝不会被拆散；
   // 两行的颜色/字体/字号差异用行内标签 {\r\c..\fn..\fs..} 覆盖即可。
-  const tagEn = `{\\r\\c${colorEn}&\\fn${fontEn}\\fs${sizeEn}}`;
-  const tagZh = `{\\r\\c${colorZh}&\\fn${fontZh}\\fs${sizeZh}}`;
+  // 中英拆成两个事件、各自用 \pos 精确定位。
+  //
+  // 为什么不用「一个事件 + \N 换行」：那样两行间距完全由 libass 按字体度量决定，
+  // 实测恒等于英文的下伸部空间（1080p / fs50 下 8px），而 ASS 没有行距标签可调，
+  // 想收紧一点都做不到。
+  //
+  // 实测结论（用 ffmpeg + libass 逐像素量出来的）：
+  //   · 行推进 = 字号 × 1.000（两种字体都一样）→「块高 = 行数 × 字号」是精确的
+  //   · \pos 定位的事件【不参与】libass 的防重叠计算，位置完全由我们决定
+  //   · 英文底边 = 中文底边 − 中文行数×中文字号 − 额外间距，改 1px 就精确移动 1px
+  // 顺带记一笔：\fs 配 \fscx/\fscy 把字形缩放回来是【无效】的，libass 仍按缩放后的高度算行距。
+  const cx = Math.round(width / 2);
+  const yZh = Math.round(height - marginV);
+  // 额外行距，单位是英文字号的倍数；负值＝把英文往下拉（默认略微收紧）
+  const gapEm = opt.lineGap == null ? BASE.lineGap : Number(opt.lineGap);
+  const gapPx = Math.round(gapEm * sizeEn);
+
+  const tagEn = `{\\an2\\c${colorEn}&\\fn${fontEn}\\fs${sizeEn}}`;
+  const tagZh = `{\\an2\\c${colorZh}&\\fn${fontZh}\\fs${sizeZh}}`;
   const events = [];
 
   cues.forEach((c, idx) => {
@@ -256,10 +286,18 @@ function buildAss(o) {
     if (!en && !zh) return;
     const start = fmtAssTime(c.start);
     const end = fmtAssTime(Math.max(c.end, c.start + 200));
-    const parts = [];
-    if (en) parts.push(tagEn + wrapEnglish(en, wrapEn).join('\\N'));
-    if (zh) parts.push(tagZh + wrapChinese(zh, wrapZh).join('\\N'));
-    events.push(`Dialogue: 0,${start},${end},BI,,0,0,0,,${parts.join('\\N')}`);
+    const zhLines = zh ? wrapChinese(zh, wrapZh) : [];
+    const enLines = en ? wrapEnglish(en, wrapEn) : [];
+    // 英文块底边：落在中文块之上，再减去额外行距
+    const enBottom = zhLines.length ? yZh - zhLines.length * sizeZh - gapPx : yZh;
+    if (enLines.length) {
+      events.push(
+        `Dialogue: 0,${start},${end},BI,,0,0,0,,{\\pos(${cx},${enBottom})}${tagEn}${enLines.join('\\N')}`
+      );
+    }
+    if (zhLines.length) {
+      events.push(`Dialogue: 0,${start},${end},BI,,0,0,0,,{\\pos(${cx},${yZh})}${tagZh}${zhLines.join('\\N')}`);
+    }
   });
 
   return head.concat(events, ['']).join('\r\n');

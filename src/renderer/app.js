@@ -636,6 +636,25 @@ function renderQueue() {
   $('queueBadge').textContent = (s.downloading || 0) + (s.queued || 0);
 }
 
+/* ==================== 系统字体列表（字幕字体选择） ==================== */
+
+/** 常见中文字体的中文名别名：.NET 报的是英文族名（Microsoft YaHei），但 libass 也认中文名 */
+const ZH_FONT_ALIASES = ['微软雅黑', '宋体', '黑体', '楷体', '仿宋', '等线', '思源黑体', '思源宋体'];
+
+async function loadFontList() {
+  try {
+    const r = await api.fonts.list();
+    const list = ((r && r.list) || []).slice();
+    if (!list.length) return;
+    for (const a of ZH_FONT_ALIASES) if (!list.includes(a)) list.push(a);
+    list.sort((a, b) => a.localeCompare(b, 'zh-Hans-CN'));
+    $('fontList').innerHTML = list.map((f) => `<option value="${esc(f)}"></option>`).join('');
+    console.log(`已加载 ${list.length} 个系统字体`);
+  } catch (err) {
+    console.error('loadFontList failed:', err && err.message);
+  }
+}
+
 /* ==================== 最近下载的博主 ==================== */
 
 async function loadRecentChannels() {
@@ -777,6 +796,9 @@ async function loadSettingsToForm() {
   $('setAssColorZh').value = s.assColorZh || '#FFD700';
   $('setAssOutlineColor').value = s.assOutlineColor || '#000000';
   $('setAssOutlineWidth').value = s.assOutlineWidth != null ? s.assOutlineWidth : 3;
+  $('setAssFontEn').value = s.assFontEn || 'Times New Roman';
+  $('setAssFontZh').value = s.assFontZh || '微软雅黑';
+  $('setAssLineGap').value = s.assLineGap != null ? s.assLineGap : -0.2;
   $('setAssFontScale').value = s.assFontScale || 1;
   $('setAssWrapEn').value = s.assWrapEnChars || 44;
   $('setAssWrapZh').value = s.assWrapZhChars || 22;
@@ -1161,6 +1183,12 @@ function bind() {
       assColorZh: $('setAssColorZh').value,
       assOutlineColor: $('setAssOutlineColor').value,
       assOutlineWidth: Number($('setAssOutlineWidth').value),
+      assFontEn: $('setAssFontEn').value.trim() || 'Times New Roman',
+      assFontZh: $('setAssFontZh').value.trim() || '微软雅黑',
+      // 允许填 -0.5 ~ 0.6；填不出数字就回到默认 -0.2
+      assLineGap: Number.isFinite(Number($('setAssLineGap').value)) && $('setAssLineGap').value !== ''
+        ? Number($('setAssLineGap').value)
+        : -0.2,
       assFontScale: Number($('setAssFontScale').value) || 1,
       assWrapEnChars: Number($('setAssWrapEn').value) || 44,
       assWrapZhChars: Number($('setAssWrapZh').value) || 22,
@@ -1278,6 +1306,7 @@ async function enqueue(items) {
   lastDoneCount = state.queue.filter((x) => x.status === 'done' || x.status === 'skipped').length;
   renderQueue();
   await loadRecentChannels();
+  loadFontList();
 
   const info = await api.info();
   if (!info.isPackaged) {

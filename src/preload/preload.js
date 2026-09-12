@@ -25,6 +25,11 @@ contextBridge.exposeInMainWorld('api', {
     set: (patch) => ipcRenderer.invoke('settings:set', patch),
   },
 
+  /** 系统已安装字体（字幕字体选择用） */
+  fonts: {
+    list: () => ipcRenderer.invoke('fonts:list'),
+  },
+
   dialog: {
     pickFolder: (current) => ipcRenderer.invoke('dialog:pickFolder', current),
     pickFile: () => ipcRenderer.invoke('dialog:pickFile'),

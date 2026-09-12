@@ -44,6 +44,9 @@ function parseSrt(text) {
 function cleanLine(s) {
   return String(s)
     .replace(/<[^>]*>/g, '')
+    // YouTube 会把消音占位 [ __ ] 转义成 [\h__\h]（\h 是 ASS 的硬空格转义）。
+    // 不在这一步还原，后面删反斜杠就会留下 [h__h] 这种垃圾（实测一条视频 204 处）。
+    .replace(/\\[hNn]/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
     .replace(/&lt;/gi, '<')
