@@ -204,15 +204,20 @@ input::placeholder {
   overflow: hidden;
 }
 
-/* ---- 上半：hero 靠上排布，不垂直居中 ---- */
+/* ---- 上半：hero ---- 
+   和下半的书签库【各占一半高度】：两块都用 flex:1 1 50%，
+   hero 在自己的半区里垂直居中（justify-content: center），
+   于是书签栏正好落在界面的中线附近。 */
 .home-hero {
-  flex: 0 0 auto;
+  flex: 1 1 50%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 9px;
   text-align: center;
-  padding-bottom: 20px;
+  padding-bottom: 16px;
 }
 /* 品牌图：官方 YouTube logo（1.44:1 横长方形，给宽度、高度自适应） */
 .empty-icon {
@@ -253,9 +258,9 @@ input::placeholder {
   font-size: 11.5px;
 }
 
-/* ---- 下半：书签式分页 ---- */
+/* ---- 下半：书签式分页（和上半 hero 各占一半高度） ---- */
 .home-library {
-  flex: 1;
+  flex: 1 1 50%;
   min-height: 0;
   display: flex;
   flex-direction: column;
