@@ -13,6 +13,29 @@
  */
 const fs = require('fs');
 const path = require('path');
+const { spawnSync } = require('child_process');
+
+/**
+ * 给边车文件加上 Windows 的「隐藏」属性。
+ *
+ * 它是给程序看的元数据（几百字节），但和视频并排躺在同一个文件夹里，
+ * 用户看到会疑惑「怎么多出来一个 json」。加隐藏属性后
+ * 资源管理器默认不显示，功能一点不受影响（扫盘照旧能读到）。
+ *
+ * 用 attrib 而不是 Node API：Node 没有暴露 Windows 的文件属性。
+ * attrib 一次能处理多个文件，分批调用避免命令行过长。
+ */
+function hideFiles(files) {
+  if (process.platform !== 'win32' || !files.length) return;
+  for (let i = 0; i < files.length; i += 40) {
+    const batch = files.slice(i, i + 40);
+    try {
+      spawnSync('attrib', ['+h', ...batch], { windowsHide: true, stdio: 'ignore' });
+    } catch (_) {
+      /* 加不上就算了，不影响功能 */
+    }
+  }
+}
 
 /** 去掉扩展名后的基准路径 */
 function baseOf(videoPath) {
@@ -48,6 +71,7 @@ function writeSidecar(videoPath, info) {
       ),
       'utf8'
     );
+    hideFiles([p]);
     return p;
   } catch (err) {
     console.error('[index] 写边车失败:', err && err.message);
@@ -95,6 +119,8 @@ function scan(outputDir, opts = {}) {
       }
     }
     if (!sidecars.length) continue;
+    // 老版本写的边车没有隐藏属性，这里补一次（每次扫盘都补，成本极低）
+    hideFiles(sidecars);
     for (const p of sidecars) {
       const rec = readSidecar(p);
       if (!rec) continue;
