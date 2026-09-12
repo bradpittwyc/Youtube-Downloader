@@ -152,6 +152,98 @@ function channelCacheFile(base) {
   return path.join(paths.cacheDir(), `${h}.json`);
 }
 
+/** 磁盘缓存超过这个时长就认为「旧了」，需要后台刷一次 */
+const CHANNEL_CACHE_FRESH_MS = 30 * 60 * 1000;
+
+function saveChannelCache(file, data) {
+  try {
+    fs.writeFileSync(file, JSON.stringify({ ts: Date.now(), data }), 'utf8');
+  } catch (_) {}
+}
+
+/** 抓完之后的收尾：按标题分类 + 写会话缓存 */
+function finishChannelData(data, target, skey) {
+  // 顺便按视频标题给这个频道分类（书签分组用）。
+  // 分类只需要粗粒度，关键词打分就够，**不花钱也不联网**；
+  // 而且此刻手上正好有几百条标题，是最准的时机。
+  try {
+    if (target.kind === 'channel' && (data.items || []).length) {
+      const cls = categories.classifyTitles((data.items || []).map((x) => x.title));
+      data.category = { id: cls.id, name: cls.name, icon: cls.icon };
+      channelsStore.setCategory(
+        {
+          url: target.channelBase || target.url,
+          title: (data.channel && data.channel.title) || '',
+          avatar: (data.channel && data.channel.avatar) || '',
+        },
+        cls.id,
+        cls.name
+      );
+    }
+  } catch (err) {
+    console.error('[main] 频道分类失败:', err && err.message);
+  }
+  if (skey) sessionCache.set(skey, { ts: Date.now(), data });
+}
+
+/**
+ * 后台静默刷新（stale-while-revalidate 的 revalidate 那一半）。
+ *
+ * 为什么需要：磁盘缓存超过 30 分钟就直接重新联网抓，用户每次点回主页的频道都要干等，
+ * 而绝大多数时候列表根本没变。改成先把旧列表秒给用户，再悄悄抓一遍最新的，抓完推给界面替换。
+ */
+let bgRefresh = null; // { key, canceled }
+
+function startBackgroundRefresh({ target, input, skey, cacheFile, bin, settings }) {
+  const key = skey || target.url || input;
+  if (bgRefresh) return; // 同一时间只跑一个，避免给 YouTube 添压
+  const state = { key, canceled: false };
+  bgRefresh = state;
+
+  (async () => {
+    try {
+      const enumerator =
+        target.kind === 'playlist' ? channel.enumeratePlaylist : channel.enumerateChannel;
+      const baseUrl = target.kind === 'playlist' ? target.url : target.channelBase;
+      console.log('[channel] 后台刷新开始：' + (target.url || input));
+      const out = await enumerator(bin, baseUrl, {
+        maxItems: Number(settings.maxItemsPerChannel) || 0,
+        readPlaylists: settings.readPlaylists !== false,
+        auth: authArgs(settings),
+        onChild: (c) => {
+          if (state.canceled) ytdlp.killTree(c);
+        },
+      });
+      if (state.canceled) return;
+      if (!out.ok) {
+        console.log('[channel] 后台刷新失败（保留旧列表）：' + (out.error || ''));
+        return;
+      }
+      const data = Object.assign({}, out.result, { targetKind: target.kind });
+      finishChannelData(data, target, skey);
+      saveChannelCache(cacheFile, data);
+      sendToRenderer('channel:refreshed', {
+        key,
+        items: (data.items || []).length,
+        data,
+      });
+      console.log(`[channel] 后台刷新完成：${(data.items || []).length} 个内容`);
+    } catch (err) {
+      console.log('[channel] 后台刷新出错（保留旧列表）：' + (err && err.message));
+    } finally {
+      if (bgRefresh === state) bgRefresh = null;
+    }
+  })();
+}
+
+/** 用户主动发起识别时，把后台刷新让开（避免两个 yt-dlp 同时打 YouTube） */
+function cancelBackgroundRefresh() {
+  if (bgRefresh) {
+    bgRefresh.canceled = true;
+    bgRefresh = null;
+  }
+}
+
 // ---------------------------------------------------------------- IPC
 
 
@@ -494,20 +586,34 @@ function registerIpc() {
         try {
           const cached = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
           const age = Date.now() - (cached.ts || 0);
-          if (cached.data && age < 30 * 60 * 1000) {
-            // 磁盘缓存命中也必须写进会话缓存，否则主页的「本次已抓取」里看不到它，
-            // 用户就没法从主页快速切回来（实测踩过：两个频道都命中磁盘缓存时面板是空的）。
+          if (cached.data) {
+            // 【关键】不再用 30 分钟卡住返回值 —— 多旧都先给出去，让用户秒开。
+            // 旧的只是「可能过期」，后台补一次就行，不该让用户干等。
             if (skey) sessionCache.set(skey, { ts: Date.now(), data: cached.data });
-            send({ phase: 'cache', label: '使用 30 分钟内的缓存列表' });
-            return { ok: true, data: cached.data, cached: true, cacheAgeSec: Math.round(age / 1000) };
+            const stale = age >= CHANNEL_CACHE_FRESH_MS;
+            if (stale) {
+              send({ phase: 'cache', label: '先用上次的列表，正在后台更新…' });
+              startBackgroundRefresh({ target, input, skey, cacheFile, bin, settings });
+            } else {
+              send({ phase: 'cache', label: '使用缓存列表' });
+            }
+            return {
+              ok: true,
+              data: cached.data,
+              cached: true,
+              cacheAgeSec: Math.round(age / 1000),
+              refreshing: stale,
+            };
           }
         } catch (_) {}
       }
 
+      // 用户主动抓取：把后台刷新让开，避免两个 yt-dlp 同时打 YouTube
+      cancelBackgroundRefresh();
+
       const enumerator =
         target.kind === 'playlist' ? channel.enumeratePlaylist : channel.enumerateChannel;
       const baseUrl = target.kind === 'playlist' ? target.url : target.channelBase;
-
       const out = await enumerator(bin, baseUrl, {
         maxItems: Number(settings.maxItemsPerChannel) || 0,
         readPlaylists: settings.readPlaylists !== false,
@@ -527,26 +633,8 @@ function registerIpc() {
       if (!out.ok) return { ok: false, error: out.error || '识别失败' };
 
       const data = Object.assign({}, out.result, { targetKind: target.kind });
-      // 顺便按视频标题给这个频道分类（书签分组用）。
-      // 分类只需要粗粒度，关键词打分就够，**不花钱也不联网**；
-      // 而且此刻手上正好有几百条标题，是最准的时机。
-      try {
-        if (target.kind === 'channel' && (data.items || []).length) {
-          const cls = categories.classifyTitles((data.items || []).map((x) => x.title));
-          data.category = { id: cls.id, name: cls.name, icon: cls.icon };
-          channelsStore.setCategory(
-            { url: target.channelBase || target.url, title: (data.channel && data.channel.title) || '', avatar: (data.channel && data.channel.avatar) || '' },
-            cls.id,
-            cls.name
-          );
-        }
-      } catch (err) {
-        console.error('[main] 频道分类失败:', err && err.message);
-      }
-      if (skey) sessionCache.set(skey, { ts: Date.now(), data });
-      try {
-        fs.writeFileSync(cacheFile, JSON.stringify({ ts: Date.now(), data }), 'utf8');
-      } catch (_) {}
+      finishChannelData(data, target, skey);
+      saveChannelCache(cacheFile, data);
       return { ok: true, data };
     } catch (err) {
       return { ok: false, error: err.message };

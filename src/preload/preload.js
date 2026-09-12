@@ -57,6 +57,8 @@ contextBridge.exposeInMainWorld('api', {
     sessionList: () => ipcRenderer.invoke('channel:session-list'),
     sessionForget: (url) => ipcRenderer.invoke('channel:session-forget', url),
     onProgress: (cb) => on('channel:progress', cb),
+    /** 后台静默刷新完成：把最新列表推给界面替换（先给旧列表秒开，再悄悄更新） */
+    onRefreshed: (cb) => on('channel:refreshed', cb),
   },
 
   channels: {

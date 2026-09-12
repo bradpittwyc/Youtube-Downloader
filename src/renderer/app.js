@@ -977,10 +977,15 @@ async function doFetch(force) {
     return;
   }
   if (state.fetching) return;
+  // 排查「界面自己跳到别的频道」这类问题全靠它：谁在什么时候发起了识别
+  console.log(`[ui] 发起识别：${input}${force ? '（强制）' : ''}`);
   state.fetching = true;
-  setFetchingUI(true);
+  // 命中缓存时 IPC 几十毫秒就回来了。如果立刻显示贾维斯球，它会一闪而过，
+  // 看着像界面在抽搐。所以延迟 280ms 再显示 —— 快路径根本不会看到球。
+  const ballTimer = setTimeout(() => setFetchingUI(true), 280);
 
   const res = await api.channel.enumerate(input, !!force);
+  clearTimeout(ballTimer);
   state.fetching = false;
   setFetchingUI(false);
 
@@ -995,7 +1000,9 @@ async function doFetch(force) {
   if (res.sessionCached) {
     $('chCacheInfo').textContent = '（本次已抓取，直接复用）';
   } else if (res.cached) {
-    $('chCacheInfo').textContent = `（缓存 ${Math.round((res.cacheAgeSec || 0) / 60)} 分钟前）`;
+    const mins = Math.round((res.cacheAgeSec || 0) / 60);
+    const ago = mins < 60 ? `${mins} 分钟前` : mins < 1440 ? `${Math.round(mins / 60)} 小时前` : `${Math.round(mins / 1440)} 天前`;
+    $('chCacheInfo').textContent = res.refreshing ? `（${ago}的列表 · 正在后台更新…）` : `（缓存 ${ago}）`;
   } else {
     $('chCacheInfo').textContent = '';
   }
@@ -1008,6 +1015,39 @@ async function doFetch(force) {
   // 识别成功不再弹提示：上方状态栏已经在显示进度，列表也直接出来了，弹窗只是噪音
   const errs = (data.warnings || []).filter((w) => w.level === 'error');
   if (errs.length) toast(`有 ${errs.length} 个分类抓取失败，详情见列表上方提示`, 'warn', 7000);
+}
+
+/** 当前正在看的频道的「键」，用来判断后台刷新推回来的结果是不是当前这个 */
+function currentChannelKey() {
+  const ch = state.data && state.data.channel;
+  return (ch && (ch.url || ch.handle)) || '';
+}
+
+/**
+ * 后台刷新完成：把界面换成最新列表。
+ * 关键是**保住用户的操作现场** —— 滚动位置、勾选、当前分类页、搜索词、过滤开关，
+ * 否则用户正翻到一半，列表自己跳回顶部、勾选也没了，比不更新还烦。
+ */
+function applyRefreshedChannel(data) {
+  const scroller = $('list');
+  const scrollTop = scroller.scrollTop;
+  const selected = new Set(state.selected);
+  const tab = state.activeTab;
+  const search = state.search;
+  console.log(`[ui] 应用后台刷新结果：${(data.channel && data.channel.title) || '?'}`);
+
+  renderChannel(data);
+
+  state.activeTab = tab;
+  state.search = search;
+  const alive = new Set(allItems().map((x) => x.id));
+  state.selected = new Set([...selected].filter((id) => alive.has(id)));
+  renderList(true);
+  scroller.scrollTop = scrollTop;
+
+  $('chCacheInfo').textContent = '（刚刚更新）';
+  const n = (data.items || []).length;
+  toast(`列表已更新（${n} 个内容）`, 'ok', 3200);
 }
 
 function setFetchingUI(on) {
@@ -1173,6 +1213,7 @@ function bind() {
       return;
     }
     $('urlInput').value = btn.getAttribute('data-bm-url');
+    console.log(`[ui] 点击书架卡片：${$('urlInput').value}`);
     doFetch(false);
   });
 
@@ -1578,6 +1619,21 @@ function bind() {
   });
 
   api.channel.onProgress(onProgress);
+
+  // 后台静默刷新完成 → 换掉列表。
+  // 只有「推回来的正是用户此刻在看的频道」才替换：后台任务可能在用户切走之后才回来，
+  // 那时替换会把用户正在看的另一个频道冲掉。
+  api.channel.onRefreshed((payload) => {
+    if (!payload || !payload.data || !state.data) return;
+    const norm = (u) => String(u || '').trim().replace(/\/+$/, '').toLowerCase();
+    const cur = norm(state.data.channel && state.data.channel.url);
+    const next = norm(payload.data.channel && payload.data.channel.url);
+    if (!cur || !next || cur !== next) {
+      console.log(`后台刷新结果不属于当前频道，忽略（当前 ${cur} / 回来 ${next}）`);
+      return;
+    }
+    applyRefreshedChannel(payload.data);
+  });
 
   api.queue.onChanged((payload) => {
     state.queue = payload.items || [];
