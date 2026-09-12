@@ -1799,14 +1799,12 @@ async function enqueue(items) {
     outputDir: $('outputDir').value.trim() || undefined,
     channel: channelRef,
   });
-  const extras = [];
-  if (!$('audioOnly').checked && $('alsoAudio').checked) extras.push('音频');
-  if ($('writeSubs').checked) extras.push('字幕');
-  if ($('studyDoc').checked && $('writeSubs').checked) extras.push('学习文档');
-  let msg = `已加入队列 ${res.added} 个`;
-  if (res.skipped) msg += `，跳过已在队列中的 ${res.skipped} 个`;
-  if (extras.length) msg += `（将同时下载${extras.join(' + ')}）`;
-  toast(msg, 'ok');
+  // 加入队列【不弹提示】：点完「开始下载」队列面板会自动滚进视野、条目当场出现，
+  // 再弹一个「已加入队列 N 个（将同时下载…）」纯属噪音（作者明确不要）。
+  // 只有真的跳过了重复项才提示一句 —— 那是用户看不到的信息。
+  if (res.skipped) {
+    toast(`已在队列中的 ${res.skipped} 个已跳过`, 'warn', 4000);
+  }
   $('queuePane').scrollIntoView({ behavior: 'smooth' });
 }
 
