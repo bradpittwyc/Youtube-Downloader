@@ -5,3 +5,5 @@ releases/
 .poc/
 tools/probe.config.json
 .probe/
+
+docs/trial*.png
