@@ -136,15 +136,12 @@ input::placeholder {
   gap: 10px;
   flex-shrink: 0;
 }
+/* 顶栏品牌标：直接用官方 logo 图片，跟应用图标保持一致
+   （logo 是 1.44:1 的横长方形，所以给高度、宽度自适应） */
 .brand-mark {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  display: grid;
-  place-items: center;
-  font-size: 14px;
-  color: #fff;
+  height: 26px;
+  width: auto;
+  display: block;
 }
 .brand-text {
   display: flex;
@@ -154,18 +151,6 @@ input::placeholder {
 .brand-text strong {
   font-size: 14px;
 }
-.bin-status {
-  font-size: 11px;
-  color: var(--text-faint);
-}
-/* 「内核就绪」用普通灰字即可，绿色太跳 */
-.bin-status.ok {
-  color: var(--text-faint);
-}
-.bin-status.bad {
-  color: var(--err);
-}
-
 .fetch-row {
   display: flex;
   gap: 8px;

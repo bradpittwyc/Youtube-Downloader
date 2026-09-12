@@ -983,13 +983,10 @@ async function refreshKernelInfo() {
     `数据目录: ${info.userData}`,
   ].join('\n');
 
-  const st = $('binStatus');
-  if (info.ytdlp.ok && info.ffmpeg.ok) {
-    st.className = 'bin-status ok';
-    st.textContent = `内核就绪 · yt-dlp ${info.ytdlp.version}`;
-  } else {
-    st.className = 'bin-status bad';
-    st.textContent = '内核异常，点击设置查看';
+  // 顶栏原来有一行「内核就绪 · yt-dlp …」的小字，按要求去掉了。
+  // 但内核真的坏了必须让用户知道，否则只会觉得"点了没反应"——改成弹一次提示。
+  if (!info.ytdlp.ok || !info.ffmpeg.ok) {
+    toast('下载内核异常（yt-dlp 或 ffmpeg 不可用），请在设置里查看', 'err', 10000);
   }
   return info;
 }
