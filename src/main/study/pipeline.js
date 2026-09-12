@@ -79,6 +79,34 @@ function snapPlanToSentences(plan, cues) {
   return { plan: out, splitCount };
 }
 
+/**
+ * 兜底分段：模型没给出可用计划时，按条数均分，尽量切在句末。
+ * 用途只有一个 —— 别让整份文档因为分段这一步生不出来。
+ */
+function fallbackPlan(cues, targetCues) {
+  const total = cues.length;
+  const per = Math.max(20, Math.min(Number(targetCues) || DEFAULT_MAX_SEG_CUES, total));
+  const parts = Math.max(1, Math.ceil(total / per));
+  const out = [];
+  let from = 1;
+  for (let p = 0; p < parts && from <= total; p++) {
+    let to = p === parts - 1 ? total : Math.min(total, from + per - 1);
+    if (p < parts - 1) {
+      // 往后找最近的句末，避免把句子劈开
+      for (let d = 0; d <= 8; d++) {
+        const cand = to + d;
+        if (cand < total && sub.endsSentence(cues[cand - 1].text)) {
+          to = cand;
+          break;
+        }
+      }
+    }
+    out.push({ from, to, topic: `第 ${p + 1} 部分` });
+    from = to + 1;
+  }
+  return out;
+}
+
 /** 粗略估算 token（中英混排按 3 字符/token 估），用于生成前给出费用预估 */
 function estimateTokens(cues) {
   const chars = cues.reduce((s, c) => s + c.text.length, 0);
@@ -114,28 +142,64 @@ async function runStudyPipeline(o) {
 
   // ---------- 第一遍：结构分析 ----------
   onProgress({ phase: 'structure', done: 0, total: 1, label: '分析内容结构' });
-  const structLines = sub.buildStructureLines(work);
+  // 【关键】把「总条数」明确告诉模型。
+  // 以前只让模型自己从最后一行去数，长字幕下它几乎必然算错结尾 ——
+  // 实测 2758 条的视频喂 639 行，要精确对齐到第 2758 条基本靠碰运气。
+  const structInput = buildStructMessage(work);
+
   let plan = null;
-  for (let attempt = 1; attempt <= 2 && !plan; attempt++) {
-    const r = await llm.callLLM(
-      cfg,
-      [
-        { role: 'system', content: llm.STRUCT_SYSTEM },
-        { role: 'user', content: structLines.join('\n') },
-      ],
-      4096
-    );
-    usage.prompt += r.usage.prompt_tokens || 0;
-    usage.completion += r.usage.completion_tokens || 0;
-    usage.calls++;
+  let struct = { takeaways: [], quotes: [] };
+  let lastErrs = null;
+
+  for (let attempt = 1; attempt <= 3 && !plan; attempt++) {
+    // 重试时把「上一次哪里不合格」告诉模型，否则同样的输入只会得到同样的错
+    const userContent = lastErrs
+      ? `${structInput}\n\n【上一次的输出不合格】\n${lastErrs.slice(0, 6).join('\n')}\n请针对以上问题修正后，重新输出完整 JSON。`
+      : structInput;
     try {
-      const candidate = llm.parseJsonLoose(r.content);
-      if (llm.validatePlan(candidate, work.length).length === 0) plan = candidate;
-    } catch (_) {
-      /* 重试 */
+      const r = await llm.callLLM(
+        cfg,
+        [
+          { role: 'system', content: llm.STRUCT_SYSTEM },
+          { role: 'user', content: userContent },
+        ],
+        4096
+      );
+      usage.prompt += r.usage.prompt_tokens || 0;
+      usage.completion += r.usage.completion_tokens || 0;
+      usage.calls++;
+
+      // 【曾经的 bug】这里直接把解析出来的对象丢给 validatePlan，
+      // 而 validatePlan 期望数组 —— 于是永远判定「不是非空数组」，
+      // 两次重试必然失败，任何没有翻译缓存的新视频都生不出文档。
+      // 必须用 extractStruct 先拆出 plan。
+      const st = llm.extractStruct(llm.parseJsonLoose(r.content));
+      if (st.takeaways.length || st.quotes.length) {
+        struct = { takeaways: st.takeaways, quotes: st.quotes };
+      }
+      const errs = llm.validatePlan(st.plan, work.length);
+      if (!errs.length) {
+        plan = st.plan;
+        break;
+      }
+      const repaired = llm.repairPlan(st.plan, work.length);
+      if (repaired) {
+        console.log(`[study] 分段计划有 ${errs.length} 处偏差，已自动修复`);
+        plan = repaired;
+        break;
+      }
+      lastErrs = errs;
+    } catch (err) {
+      lastErrs = [String((err && err.message) || err).slice(0, 200)];
     }
   }
-  if (!plan) throw new Error('结构分析失败（模型两次都没给出合法分段计划）');
+  if (!plan) {
+    // 兜底：模型完全没给出可用计划时按条数均分（切在句末）。
+    // 分段粗糙总比整份文档生不出来好。
+    plan = fallbackPlan(work, maxSegCues);
+    usage.fallbackPlan = 1;
+    console.warn('[study] 模型未给出可用分段计划，改用均分兜底');
+  }
 
   // 边界吸附
   const snapped = snapPlanToSentences(plan, work);
@@ -310,8 +374,8 @@ async function runStudyPipeline(o) {
     cueZh,
     cues: work,
     vocab: vocabAgg,
-    takeaways,
-    quotes: resolveQuoteTimes(quotes, work),
+    takeaways: struct.takeaways,
+    quotes: resolveQuoteTimes(struct.quotes, work),
     failed,
     stats: Object.assign({}, loaded.stats, {
       usedCues: work.length,
@@ -359,6 +423,26 @@ function resolveQuoteTimes(quotes, cues) {
 }
 
 /**
+ * 构造「结构分析」的用户消息。
+ *
+ * 【关键】必须把总条数明确写出来。以前只让模型自己从最后一行去数，
+ * 长字幕下它几乎必然算错结尾 —— 实测 2758 条的视频要喂 639 行，
+ * 让模型精确对齐到第 2758 条基本靠碰运气。
+ *
+ * 还要说清「序号」指的是每行开头的字幕编号，不是行号 —— 两者在长输入里很容易混。
+ */
+function buildStructMessage(work) {
+  return [
+    `【总条数】${work.length} 条`,
+    '【输入格式】每行「起始序号-结束序号: 文本」，序号是字幕条目编号（不是行号）',
+    '',
+    sub.buildStructureLines(work).join('\n'),
+    '',
+    `【硬性要求】plan 必须从第 1 条开始、到第 ${work.length} 条结束，各段首尾相接、不重叠、不遗漏。`,
+  ].join('\n');
+}
+
+/**
  * 只跑「结构分析」这一遍，拿 takeaways / quotes。
  *
  * 用途：给【已经缓存过全文翻译】的旧文档补上总结。
@@ -370,26 +454,31 @@ async function runSummaryOnly(o) {
   const work = o.cues && o.cues.length ? o.cues : sub.loadCues(o.srtPath).cues;
   const usage = { prompt: 0, completion: 0, calls: 0, repairs: 0, splits: 0 };
   if (!work.length) return { takeaways: [], quotes: [], usage };
-  const structLines = sub.buildStructureLines(work);
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    const r = await llm.callLLM(
-      cfg,
-      [
-        { role: 'system', content: llm.STRUCT_SYSTEM },
-        { role: 'user', content: structLines.join('\n') },
-      ],
-      4096
-    );
-    usage.prompt += r.usage.prompt_tokens || 0;
-    usage.completion += r.usage.completion_tokens || 0;
-    usage.calls++;
+  const structInput = buildStructMessage(work);
+  let lastErrs = null;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const userContent = lastErrs
+      ? `${structInput}\n\n【上一次的输出不合格】\n${lastErrs.slice(0, 6).join('\n')}\n请针对以上问题修正后，重新输出完整 JSON。`
+      : structInput;
     try {
+      const r = await llm.callLLM(
+        cfg,
+        [
+          { role: 'system', content: llm.STRUCT_SYSTEM },
+          { role: 'user', content: userContent },
+        ],
+        4096
+      );
+      usage.prompt += r.usage.prompt_tokens || 0;
+      usage.completion += r.usage.completion_tokens || 0;
+      usage.calls++;
       const st = llm.extractStruct(llm.parseJsonLoose(r.content));
       if (st.takeaways.length || st.quotes.length) {
         return { takeaways: st.takeaways, quotes: resolveQuoteTimes(st.quotes, work), usage };
       }
-    } catch (_) {
-      /* 重试 */
+      lastErrs = llm.validatePlan(st.plan, work.length);
+    } catch (err) {
+      lastErrs = [String((err && err.message) || err).slice(0, 200)];
     }
   }
   return { takeaways: [], quotes: [], usage };

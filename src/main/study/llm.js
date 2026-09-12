@@ -122,14 +122,16 @@ const STRUCT_SYSTEM = `你是专业的字幕结构化编辑。用户会给你一
 
 这些文本是从自动字幕切分出来的碎片，缺少标点、大小写和完整句子结构。你只做结构分析，不要翻译、不要改写。
 
+【重要】「序号」指的是每行开头的**字幕条目编号**，不是行号。输入里的一行可能覆盖好几条字幕（例如「101-105: ...」），段落边界要用这种条目编号表示。
+
 任务一 · 分段：把整篇内容按语义和主题划分成若干段落，每段在内容上自成一体。
 
 硬性要求：
 1. 段落边界必须落在给定的序号边界上；
 2. 段落边界必须尽量落在句子结束的位置（文本以 . ? ! 收尾、且下一条以大写字母开头），绝不要把一句话从中间切开；
-3. 各段区间必须严格首尾相接、不重叠、不遗漏：第一段从第 1 条开始，最后一段到最后一条结束；
+3. 各段区间必须严格首尾相接、不重叠、不遗漏：第一段从第 1 条开始，最后一段必须正好到最后一条结束（总条数在用户消息开头给出，请直接用它，不要自己数）；
 4. 段落数量按内容自然划分，通常 6~25 段；
-5. 每段给一个简短的中文主题小标题，不超过 15 个字。
+5. 每段给一个简短的中文主题小标题，6~15 个字，不要带句号或引号。
 
 任务二 · takeaways（全文要点）：用 3~5 条总结整个视频的核心内容。
 每条一句话，既要英文 "en"，也要对应的简体中文 "zh"。
@@ -137,12 +139,13 @@ const STRUCT_SYSTEM = `你是专业的字幕结构化编辑。用户会给你一
 
 任务三 · quotes（金句）：摘取视频中最精彩的 3~6 句话——
 有洞察力、有冲击力、值得记住、适合背诵的那种。每条给出：
-  "cue"：该句在输入中的起始序号（整数，必须在 1 到总条数之间）
+  "cue"：该句的起始字幕条目编号（整数，必须在 1 到总条数之间）
   "en"：英文原句（从原文原样摘取，可修正明显的语音识别错误）
   "zh"：中文翻译
 
 【输出格式】只输出一个 JSON 对象，不要任何解释、不要 Markdown 代码块。
 注意：顶层必须是对象（以 { 开头），不是数组。
+字符串里如果出现英文双引号，必须转义成 \\"。
 {"plan":[{"from":1,"to":45,"topic":"开场与本期主题"}],"takeaways":[{"en":"...","zh":"..."}],"quotes":[{"cue":12,"en":"...","zh":"..."}]}`;
 
 const TRANSLATE_SYSTEM = `你是资深英中翻译与英语教学编辑。用户会给你一段 YouTube 视频的自动字幕碎片（带序号），以及上一段的结尾作为上下文。
@@ -152,8 +155,10 @@ const TRANSLATE_SYSTEM = `你是资深英中翻译与英语教学编辑。用户
 请输出严格的 JSON 对象，包含五个字段：
 
 1. "en"：把碎片重排成通顺的英文段落。补全标点与大小写、合并被切断的句子、去掉 [music] 之类的音效标记。必须忠实原文，不要改写成你自己的话，不要漏掉任何信息。可以顺手修正明显的语音识别错误（例如把人名、专业术语的拼写改对）。
+   本段开头若承接上一段未说完的句子，可以借上下文补全，但只输出属于本段的内容。
+   术语处理：同一个术语在本段内保持同一种写法；如果上下文里已经出现过某个译法，沿用它的中文译法。
 
-2. "zh"：把 "en" 翻译成自然流畅的简体中文。忠实准确，不要意译扩写。专业术语保留英文原词并在括号内给中文，例如 REM sleep（快速眼动睡眠）。
+2. "zh"：把 "en" 翻译成自然流畅的简体中文。忠实准确，不要意译扩写。专业术语保留英文原词并在括号内给中文，例如 REM sleep（快速眼动睡眠）。不要逐字硬译，也不要加入原文没有的解释。
 
 3. "notes"：长难句精讲。从本段挑 1~2 个真正值得讲的句子（结构复杂、含地道表达或隐含逻辑），返回数组：
    [{"sentence":"英文原句，必须从 en 里原样摘取","explain":"中文讲解：句子结构怎么拆、难在哪里、为什么这样表达"}]
@@ -175,6 +180,9 @@ const TRANSLATE_SYSTEM = `你是资深英中翻译与英语教学编辑。用户
 
    错误示例（把 12-13 合并了，缺少 13）：
    "cues": "12|我一直很期待这次对话\\n14|我知道很多人会很想了解"
+
+【JSON 转义】所有字符串里的英文双引号必须转义成 \\"，反斜杠写成 \\\\。
+英文原文里出现引语、书名、俚语时很容易踩这个坑，写坏 JSON 会导致整段作废重来。
 
 只输出 JSON 对象，不要任何解释、不要 Markdown 代码块。`;
 
@@ -237,6 +245,47 @@ function validatePlan(plan, total) {
   return errs;
 }
 
+/**
+ * 修复模型给出的分段计划。
+ *
+ * 为什么需要：validatePlan 要求 plan 精确覆盖 1..total 且首尾相接，
+ * 但长字幕下模型几乎必然算错边界 —— 实测那个 1 小时 17 分的视频有 2758 条，
+ * 喂进去 639 行，要模型精确对齐到第 2758 条基本是碰运气。
+ * 而「分段计划」本身只是把长文切成便于加工的块的启发式，边界差几条无伤大雅，
+ * 后面还有「句末吸附」和「大段拆分」两道处理。所以能修就修，不该整单失败。
+ *
+ * 修法：排序 → 起点一律接上一段（吸收空洞与重叠）→ 裁到 [1,total]
+ *       → 结尾没覆盖满就把最后一段拉长。
+ *
+ * @returns {Array|null} 修好的计划；连一个可用段都没有时返回 null
+ */
+function repairPlan(raw, total) {
+  if (!Array.isArray(raw) || !raw.length || !(Number(total) > 0)) return null;
+  const items = [];
+  for (const p of raw) {
+    const from = Math.round(Number(p && p.from));
+    const to = Math.round(Number(p && p.to));
+    if (!Number.isFinite(from) || !Number.isFinite(to)) continue;
+    items.push({ from, to, topic: String((p && p.topic) || '').trim() });
+  }
+  if (!items.length) return null;
+  items.sort((a, b) => a.from - b.from);
+
+  const out = [];
+  let expect = 1;
+  for (const p of items) {
+    if (expect > total) break;
+    const to = Math.min(Math.max(p.to, 1), total);
+    if (to < expect) continue; // 整段落在已处理范围内（重叠段）
+    out.push({ from: expect, to, topic: p.topic || `第 ${out.length + 1} 部分` });
+    expect = to + 1;
+  }
+  if (!out.length) return null;
+  // 结尾没到 total → 把最后一段拉长。宁可最后一段大一点，也不要整份文档生不出来。
+  if (out[out.length - 1].to < total) out[out.length - 1].to = total;
+  return out;
+}
+
 function parseCuesField(raw) {
   if (Array.isArray(raw)) {
     return raw
@@ -268,6 +317,7 @@ module.exports = {
   STRUCT_SYSTEM,
   TRANSLATE_SYSTEM,
   validatePlan,
+  repairPlan,
   extractStruct,
   normTakeaways,
   normQuotes,

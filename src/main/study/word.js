@@ -72,6 +72,12 @@ function makeStyles() {
       mk('NoteA', { font: FONT, size: 20, color: '34495E' }, { spacing: { line: 300, after: 120 }, indent: { left: 240 } }),
       mk('VocabLine', { font: FONT, size: 19, color: '2C3E50' }, { spacing: { line: 280, after: 40 }, indent: { left: 240 } }),
       mk('AppTitle', { font: FONT_UI, size: 28, bold: true, color: DARK }, { spacing: { before: 200, after: 120 } }),
+      // 段内小节标记：小、灰、不抢戏，但让「长难句 / 词汇」的起点一眼可见
+      mk('SegLabel', { font: FONT_UI, size: 18, color: GRAY }, { spacing: { before: 60, after: 30 } }),
+      // 附录一的段落锚点：[3] 这样的灰色角标，方便和正文对照
+      mk('AppAnchor', { font: FONT_UI, size: 18, color: GRAY }, { spacing: { before: 160, after: 30 } }),
+      // 目录表里的行
+      mk('TocCell', { font: FONT_UI, size: 18, color: '333333' }, { spacing: { line: 260, after: 0 } }),
     ],
   };
 }
@@ -115,9 +121,79 @@ async function buildStudyDocx(input) {
   if (meta.durationMs) metaBits.push(`时长：${fmtDuration(meta.durationMs)}`);
   // 上传日期（由下载时抓取，缺失时回退到文件名里的 [YYYY-MM-DD]）
   if (meta.uploadDate) metaBits.push(`上传：${meta.uploadDate}`);
+  // 长度统计放在一起，方便一眼判断这份文档的规模
+  const enChars = segments.reduce((s, x) => s + String(x.en || '').length, 0);
+  if (segments.length) metaBits.push(`共 ${segments.length} 段 · 英文约 ${Math.round(enChars / 5.6)} 词`);
   if (meta.url) metaBits.push(`链接：${meta.url}`);
   for (const b of metaBits) {
     children.push(new Paragraph({ style: 'MetaLine', children: runs(b, FONT_UI, { size: 18, color: GRAY }) }));
+  }
+
+  // ---------- 段落导航 ----------
+  // 长文档（实测一个 77 分钟的视频有 31 段）没有目录根本翻不动。
+  // 段落少的时候目录反而是噪音，所以只在 8 段以上才加。
+  if (segments.length >= 8) {
+    children.push(
+      new Paragraph({
+        style: 'SegHeading',
+        children: [new TextRun({ text: '本节目录', font: FONT_UI, size: 26, bold: true, color: ACCENT })],
+      })
+    );
+    const navCell = (text, o) =>
+      new TableCell({
+        margins: { top: 30, bottom: 30, left: 100, right: 100 },
+        shading: o && o.fill ? { type: ShadingType.CLEAR, fill: o.fill } : undefined,
+        children: [
+          new Paragraph({
+            style: 'TocCell',
+            children: [
+              new TextRun({
+                text: String(text == null ? '' : text),
+                font: FONT_UI,
+                size: 18,
+                bold: !!(o && o.bold),
+                color: (o && o.color) || '333333',
+              }),
+            ],
+          }),
+        ],
+      });
+    const navRows = [
+      new TableRow({
+        tableHeader: true,
+        children: [
+          navCell('段落', { bold: true, fill: 'F2F3F4' }),
+          navCell('主题', { bold: true, fill: 'F2F3F4' }),
+          navCell('时间码', { bold: true, fill: 'F2F3F4' }),
+        ],
+      }),
+    ];
+    for (const seg of segments) {
+      navRows.push(
+        new TableRow({
+          children: [
+            navCell(String(seg.index)),
+            navCell(seg.topic || ''),
+            navCell(seg.startMs != null ? tc(seg.startMs) : '', { color: GRAY }),
+          ],
+        })
+      );
+    }
+    children.push(
+      new Table({
+        width: { size: 100, type: WidthType.PERCENTAGE },
+        borders: {
+          top: { style: BorderStyle.SINGLE, size: 2, color: 'E5E7E9' },
+          bottom: { style: BorderStyle.SINGLE, size: 2, color: 'E5E7E9' },
+          left: { style: BorderStyle.SINGLE, size: 2, color: 'E5E7E9' },
+          right: { style: BorderStyle.SINGLE, size: 2, color: 'E5E7E9' },
+          insideHorizontal: { style: BorderStyle.SINGLE, size: 2, color: 'EFEFEF' },
+          insideVertical: { style: BorderStyle.SINGLE, size: 2, color: 'EFEFEF' },
+        },
+        columnWidths: [900, 6600, 1600],
+        rows: navRows,
+      })
+    );
   }
 
   // ---------- Takeaways：全文要点（紧跟在频道/时长/上传/链接下面）----------
@@ -132,14 +208,27 @@ async function buildStudyDocx(input) {
     takeaways.forEach((t) => {
       // 用黑色圆点代替序号：Takeaways 是并列的要点，不需要先后次序
       if (t.en) children.push(new Paragraph({ style: 'BodyEN', children: runs(`● ${t.en}`, FONT) }));
-      if (t.zh) children.push(new Paragraph({ style: 'BodyZH', children: runs(`　　 ${t.zh}`, FONT) }));
+      // 中文用真正的段落缩进，不要用全角空格凑——换字号就对不齐了
+      if (t.zh) {
+        children.push(
+          new Paragraph({ style: 'BodyZH', indent: { left: 260 }, children: runs(t.zh, FONT) })
+        );
+      }
     });
   }
 
   // ---------- 正文：逐段中英对照 ----------
   for (const seg of segments) {
+    // topic 可能为空 —— 直接拼会产生「段落 3　」这种尾随空白
+    const topic = String(seg.topic || '').trim();
     const head = [
-      new TextRun({ text: `段落 ${seg.index}　${seg.topic || ''}`, font: FONT_UI, size: 26, bold: true, color: ACCENT }),
+      new TextRun({
+        text: topic ? `段落 ${seg.index}　${topic}` : `段落 ${seg.index}`,
+        font: FONT_UI,
+        size: 26,
+        bold: true,
+        color: ACCENT,
+      }),
     ];
     if (opt.segmentTimecode && seg.startMs != null) {
       head.push(new TextRun({ text: `　[${tc(seg.startMs)}]`, font: FONT_UI, size: 18, color: GRAY }));
@@ -149,16 +238,30 @@ async function buildStudyDocx(input) {
     if (seg.en) children.push(new Paragraph({ style: 'BodyEN', children: runs(seg.en, FONT) }));
     if (seg.zh) children.push(new Paragraph({ style: 'BodyZH', children: runs(seg.zh, FONT) }));
 
-    for (const n of seg.notes || []) {
+    // 长难句和词汇加上小节标记 —— 不加的话它们和正文混成一片，
+    // 读者没法一眼看出「这段有没有需要细看的东西」，也没法快速跳过。
+    const notes = seg.notes || [];
+    if (notes.length) {
+      children.push(
+        new Paragraph({ style: 'SegLabel', children: runs('长难句精讲', FONT_UI, { size: 18, color: GRAY }) })
+      );
+    }
+    for (const n of notes) {
       children.push(
         new Paragraph({ style: 'NoteQ', children: runs(`◆ ${n.sentence}`, FONT, { size: 20, italics: true, color: '2E4053' }) })
       );
       children.push(
-        new Paragraph({ style: 'NoteA', children: runs(`　 ${n.explain}`, FONT, { size: 20, color: '34495E' }) })
+        new Paragraph({ style: 'NoteA', children: runs(n.explain, FONT, { size: 20, color: '34495E' }) })
       );
     }
 
-    for (const v of seg.vocab || []) {
+    const vocabSeg = seg.vocab || [];
+    if (vocabSeg.length) {
+      children.push(
+        new Paragraph({ style: 'SegLabel', children: runs('重点词汇', FONT_UI, { size: 18, color: GRAY }) })
+      );
+    }
+    for (const v of vocabSeg) {
       const line = `${v.word}${v.phonetic ? '  ' + v.phonetic : ''}${v.pos ? '  ' + v.pos : ''}　—　${v.def || ''}`;
       children.push(new Paragraph({ style: 'VocabLine', children: runs(`· ${line}`, FONT, { size: 19, color: '2C3E50' }) }));
     }
@@ -175,6 +278,21 @@ async function buildStudyDocx(input) {
     );
     for (const seg of segments) {
       if (!seg.en) continue;
+      // 纯英文版是一整块连续文本，不加锚点根本找不到「刚才那段英文在哪」。
+      // 用灰色小角标标出段落号，方便和前半部分对照。
+      children.push(
+        new Paragraph({
+          style: 'AppAnchor',
+          children: [
+            new TextRun({
+              text: `${seg.index}${seg.topic ? '　' + seg.topic : ''}`,
+              font: FONT_UI,
+              size: 18,
+              color: GRAY,
+            }),
+          ],
+        })
+      );
       children.push(new Paragraph({ style: 'BodyEN', children: runs(seg.en, FONT) }));
     }
   }
@@ -262,13 +380,15 @@ async function buildStudyDocx(input) {
         // 时间码【接在英文句末】而不是单独起一行。
         // 单独一行时它没有缩进、贴着左边距，看起来更像下一句的标签，分不清属于谁（实测踩过）。
         const kids = runs(`◆ ${q.en}`, FONT, { size: 22, italics: true, color: '2E4053' });
-        if (q.timeText) {
-          kids.push(new TextRun({ text: `　[${q.timeText}]`, font: FONT_UI, size: 18, color: GRAY }));
+        // 时间码格式全篇统一成 hh:mm:ss —— 正文用 tc()，金句以前用 fmtClock() 的 1:03，
+        // 同一份文档里两种写法很扎眼。
+        if (q.startMs != null) {
+          kids.push(new TextRun({ text: `　[${tc(q.startMs)}]`, font: FONT_UI, size: 18, color: GRAY }));
         }
         children.push(new Paragraph({ style: 'NoteQ', children: kids }));
       }
       if (q.zh) {
-        children.push(new Paragraph({ style: 'NoteA', children: runs(`　 ${q.zh}`, FONT, { size: 20, color: '34495E' }) }));
+        children.push(new Paragraph({ style: 'NoteA', children: runs(q.zh, FONT, { size: 20, color: '34495E' }) }));
       }
     }
   }
