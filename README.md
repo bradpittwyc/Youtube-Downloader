@@ -10,11 +10,14 @@
 
 | 文件 | 说明 |
 |---|---|
-| `dist/YouTubeDownloader-Setup-1.1.0.exe` | **安装版**（149 MB）。可选安装目录，自动创建开始菜单与桌面快捷方式，带标准卸载程序 |
-| `dist/YouTubeDownloader-Portable-1.1.0.exe` | **免安装版**（149 MB）。双击直接运行，不写注册表 |
-| `releases/v1.0.0/` | v1.0.0 冻结产物（不含学习文档功能） |
+| `dist/YouTubeDownloader-Setup-<版本>.exe` | **安装版**（约 149 MB）。可选安装目录，自动创建开始菜单与桌面快捷方式，带标准卸载程序 |
+| `dist/YouTubeDownloader-Portable-<版本>.exe` | **免安装版**（约 149 MB）。双击直接运行，不写注册表 |
 | `src/` | 全部源码 |
 | `tools/` | 测试与验证脚本 |
+| `CHANGELOG.md` | 每个版本的改动记录 |
+
+> 构建产物**不在版本库里归档**（`dist/`、`releases/` 都被 `.gitignore` 排除）。
+> 历史版本请从 git tag 重建，见下方「版本备份、回滚与重建」。
 
 > 安装包体积主要来自 Electron 运行时（约 100 MB）与 `ffmpeg.exe`（96 MB）。这是"用户零依赖"的代价。
 
