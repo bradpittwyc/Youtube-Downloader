@@ -861,6 +861,77 @@ input::placeholder {
   z-index: 50;
   backdrop-filter: blur(2px);
 }
+
+/* ================= 作品详情预览 ================= */
+.preview-card {
+  width: 760px;
+  max-width: 92vw;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+.preview-body {
+  padding: 0 18px 18px;
+  overflow-y: auto;
+  flex: 1;
+}
+.pv-cover-wrap {
+  background: #000;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 14px;
+  line-height: 0;
+}
+.pv-cover {
+  width: 100%;
+  max-height: 380px;
+  object-fit: contain;
+  background: #000;
+}
+.pv-title {
+  font-size: 17px;
+  line-height: 1.45;
+  margin: 0 0 8px;
+  color: var(--text);
+}
+.pv-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  margin-bottom: 14px;
+}
+.pv-meta span {
+  white-space: nowrap;
+}
+.pv-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.pv-actions a.btn {
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+}
+.pv-label {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 5px;
+  margin-bottom: 8px;
+}
+.pv-desc {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 300px;
+  overflow-y: auto;
+}
 .modal-card {
   background: var(--bg-2);
   border: 1px solid var(--line);

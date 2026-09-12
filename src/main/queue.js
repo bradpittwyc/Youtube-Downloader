@@ -13,6 +13,7 @@ const paths = require('./paths');
 const settingsStore = require('./settings');
 const study = require('./study');
 const channelsStore = require('./channels-store');
+const downloadsIndex = require('./downloads-index');
 
 /**
  * 分辨率上限（只限制高度，具体编码由编码策略决定）
@@ -128,6 +129,34 @@ function downloadSpec(o) {
   return `${(o && o.quality) || 'best'}|${(o && o.videoCodec) || 'quality'}`;
 }
 
+/**
+ * 读取 yt-dlp 的 --write-info-json 产物（顺手删掉它，只留我们自己的紧凑边车）。
+ * 好处是零额外网络请求：元数据下载时本来就抓过了。
+ */
+function readInfoJson(videoPath) {
+  if (!videoPath) return null;
+  const p = `${String(videoPath).replace(/\.[^.\\/]+$/, '')}.info.json`;
+  try {
+    if (!fs.existsSync(p)) return null;
+    const j = JSON.parse(fs.readFileSync(p, 'utf8').replace(/^\uFEFF/, ''));
+    try {
+      fs.unlinkSync(p); // 原始 info.json 又大又杂，读完就删
+    } catch (_) {}
+    return {
+      id: j.id || '',
+      description: j.description || '',
+      uploadDate: j.upload_date || '',
+      viewCount: typeof j.view_count === 'number' ? j.view_count : null,
+      likeCount: typeof j.like_count === 'number' ? j.like_count : null,
+      duration: typeof j.duration === 'number' ? j.duration : null,
+      channel: j.channel || j.uploader || '',
+    };
+  } catch (err) {
+    console.error('[queue] 读 info.json 失败:', err && err.message);
+    return null;
+  }
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -230,6 +259,7 @@ class DownloadQueue extends EventEmitter {
       const raw = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
       const list = Array.isArray(raw) ? raw : raw.items || (raw.key ? [raw] : []);
       let fixed = 0;
+      let backfilled = 0;
       for (const it of list) {
         if (!it || !it.key) continue;
         const item = Object.assign({}, it);
@@ -260,9 +290,38 @@ class DownloadQueue extends EventEmitter {
             }
           } catch (_) {}
         }
+        // 自愈：已完成的任务若还没写「边车文件」，这里补上。
+        // 边车把视频 ID 落到磁盘上，是「按 ID 识别本地文件」的依据；
+        // 老版本下载的、以及边车机制上线前下载的，都得补一次，
+        // 否则本地明明有文件，列表上却不显示「已下载」。
+        if (
+          (item.status === 'done' || item.status === 'skipped') &&
+          item.filePath &&
+          fs.existsSync(item.filePath)
+        ) {
+          try {
+            const sc = downloadsIndex.sidecarOf(item.filePath);
+            if (!fs.existsSync(sc)) {
+              downloadsIndex.writeSidecar(item.filePath, {
+                id: item.id,
+                title: item.title,
+                channel: item.channel,
+                uploadDate: item.uploadDate,
+                viewCount: item.viewCount,
+                duration: item.duration,
+                url: item.url,
+              });
+              backfilled++;
+            }
+          } catch (_) {}
+        }
         this.items.set(item.key, item);
       }
       console.log(`[queue] restored ${this.items.size} item(s)`);
+      if (backfilled) {
+        downloadsIndex.invalidate();
+        console.log(`[queue] 已为 ${backfilled} 个历史下载补写边车文件（按 ID 识别本地文件用）`);
+      }
       if (fixed) console.log(`[queue] 已补回 ${fixed} 个任务遗漏的字幕记录`);
     } catch (err) {
       console.error('[queue] load failed:', err.message);
@@ -288,8 +347,11 @@ class DownloadQueue extends EventEmitter {
   }
 
   changed(immediate) {
-    this.persist();
     if (immediate) {
+      // 重要事件（入队、状态流转、完成、失败）立即同步落盘，不等防抖。
+      // 原先统一走 400ms 防抖，强杀进程/断电会丢掉最后几秒的操作记录。
+      // 进度更新仍然走防抖 —— 那种一秒好几十次的写入才是真正需要节流的。
+      this.persistNow();
       if (this._emitTimer) {
         clearTimeout(this._emitTimer);
         this._emitTimer = null;
@@ -297,11 +359,31 @@ class DownloadQueue extends EventEmitter {
       this.emit('changed');
       return;
     }
+    this.persist();
     if (this._emitTimer) return;
     this._emitTimer = setTimeout(() => {
       this._emitTimer = null;
       this.emit('changed');
     }, 300);
+  }
+
+  /** 同步落盘（取消防抖里的待写） */
+  persistNow() {
+    if (this._persistTimer) {
+      clearTimeout(this._persistTimer);
+      this._persistTimer = null;
+    }
+    try {
+      const list = Array.from(this.items.values()).map((it) => {
+        const c = Object.assign({}, it);
+        delete c._pause;
+        delete c._remove;
+        return c;
+      });
+      fs.writeFileSync(paths.queueFile(), JSON.stringify(list, null, 2), 'utf8');
+    } catch (err) {
+      console.error('[queue] persistNow failed:', err && err.message);
+    }
   }
 
   // ---------- 查询 ----------
@@ -324,6 +406,8 @@ class DownloadQueue extends EventEmitter {
         liveStatus: it.liveStatus,
         thumbnail: it.thumbnail,
         duration: it.duration,
+        viewCount: it.viewCount == null ? null : it.viewCount,
+        uploadDate: it.uploadDate || '',
         status: it.status,
         progress: it.progress || 0,
         downloadedBytes: it.downloadedBytes || 0,
@@ -462,6 +546,8 @@ class DownloadQueue extends EventEmitter {
         liveStatus: it.liveStatus || null,
         thumbnail: it.thumbnail || '',
         duration: it.duration || null,
+        /** 播放量：写进边车文件，让作品详情在离线时也能显示 */
+        viewCount: it.viewCount == null ? null : it.viewCount,
         uploadDate: '', // 下载开始时由 META| 行填充（YYYYMMDD）
         width: 0, //  同上，用于 ASS 字幕的分辨率适配
         height: 0,
@@ -608,6 +694,10 @@ class DownloadQueue extends EventEmitter {
       // 下载完成后的真实落盘路径
       '--print',
       'after_move:FINAL|%(filepath)s',
+      // 顺带把完整元信息写出来（文案/播放量/发布时间都在里面）。
+      // 这一步【不产生额外网络请求】——元数据本来就抓过了，只是落一份到磁盘。
+      // 下载成功后我们读它写进紧凑的边车文件，再把这份大的删掉。
+      '--write-info-json',
       '--ffmpeg-location',
       ffDir,
       '--retries',
@@ -787,6 +877,29 @@ class DownloadQueue extends EventEmitter {
           channelsStore.bump(item.channelRef, 1);
         } catch (err) {
           console.error('[queue] channels bump failed:', err && err.message);
+        }
+      }
+      // 在视频旁边写「边车文件」，把视频 ID 落到磁盘上。
+      // 文件名模板不含 ID，只有边车能让「是否已下载」完全以磁盘为准——
+      // 队列被清空 / 换机器 / 重装之后，依然能识别出本地已有的作品。
+      // 同时它也是「作品详情」的离线缓存：点开预览不用联网就能看到文案。
+      if (item.filePath) {
+        try {
+          const extra = readInfoJson(item.filePath);
+          downloadsIndex.writeSidecar(item.filePath, {
+            id: item.id,
+            title: item.title,
+            channel: item.channel || (extra && extra.channel),
+            uploadDate: item.uploadDate || (extra && extra.uploadDate),
+            viewCount: item.viewCount != null ? item.viewCount : extra && extra.viewCount,
+            likeCount: extra && extra.likeCount,
+            duration: item.duration || (extra && extra.duration),
+            url: item.url,
+            description: extra && extra.description,
+          });
+          downloadsIndex.invalidate();
+        } catch (err) {
+          console.error('[queue] 写下载边车失败:', err && err.message);
         }
       }
       item.subPaths = collectSubtitleFiles(item.filePath);
@@ -1290,4 +1403,5 @@ module.exports = {
   sanitizeFolderName,
   collectSubtitleFiles,
   refreshSubPaths,
+  readInfoJson,
 };

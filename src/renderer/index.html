@@ -480,6 +480,30 @@
       </div>
     </div>
 
+    <!-- 作品详情预览：点列表里的封面打开 -->
+    <div id="previewModal" class="modal hidden">
+      <div class="modal-card preview-card">
+        <div class="modal-head">
+          <h3>作品详情</h3>
+          <button id="btnClosePreview" class="btn ghost">✕</button>
+        </div>
+        <div class="preview-body">
+          <div class="pv-cover-wrap">
+            <img id="pvCover" class="pv-cover" alt="" />
+          </div>
+          <h2 id="pvTitle" class="pv-title">—</h2>
+          <div id="pvMeta" class="pv-meta"></div>
+          <div class="pv-actions">
+            <button id="pvDownload" class="btn primary">下载这个</button>
+            <button id="pvOpenFolder" class="btn ghost hidden">打开所在文件夹</button>
+            <a id="pvYoutube" class="btn ghost" target="_blank" rel="noreferrer">在 YouTube 打开</a>
+          </div>
+          <div class="pv-label">文案</div>
+          <div id="pvDesc" class="pv-desc"></div>
+        </div>
+      </div>
+    </div>
+
     <div id="toasts" class="toasts"></div>
     <script src="app.js"></script>
   </body>

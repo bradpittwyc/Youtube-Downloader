@@ -41,6 +41,8 @@ const state = {
   playlistVideos: {},
   /** 正在读取中的播放列表 id */
   playlistLoading: new Set(),
+  /** 磁盘上的已下载索引：视频ID → 本地记录（按 ID 识别本地文件，不依赖队列历史） */
+  downloadedIndex: new Map(),
   selected: new Set(),
   renderedCount: 0,
   queue: [],
@@ -50,16 +52,46 @@ const state = {
 };
 
 /**
- * 已下载完成的视频 id 集合。
- * 必须同时确认【文件还在磁盘上】——用户可能把文件删了，
- * 这时不能只凭历史状态就说"已下载"，否则重新下载会被永久跳过（实测踩过）。
+ * 已下载完成的视频 id 集合。三个来源合并，宁多勿漏：
+ *   1. 队列里 done / skipped 且文件还在
+ *   2. 磁盘上的「边车索引」—— 按视频 ID 扫描下载目录得到，
+ *      队列被清空 / 换机器 / 重装之后依然能识别出本地已有的作品
+ * 必须确认文件还在磁盘上：用户可能把文件删了，这时不能只说"已下载"，
+ * 否则重新下载会被永久跳过（实测踩过）。
+ *
+ * 结果做了缓存：列表每渲染一行都要问一次，上千行时重建 Set 会明显变慢。
  */
+let _doneCache = null;
 function doneKeys() {
-  return new Set(
+  if (_doneCache) return _doneCache;
+  const set = new Set(
     state.queue
       .filter((q) => (q.status === 'done' || q.status === 'skipped') && q.fileExists !== false)
       .map((q) => q.key)
   );
+  for (const id of state.downloadedIndex.keys()) set.add(id);
+  _doneCache = set;
+  return set;
+}
+/** 队列或索引变化后必须调用，否则列表上的「已下载」标记会是旧的 */
+function invalidateDoneCache() {
+  _doneCache = null;
+}
+
+/** 拉取磁盘上的已完成索引（按视频 ID） */
+async function loadDownloadsIndex(fresh) {
+  try {
+    const r = await api.downloads.index({ fresh: !!fresh });
+    const map = new Map();
+    for (const it of (r && r.list) || []) map.set(it.id, it);
+    state.downloadedIndex = map;
+    invalidateDoneCache();
+    console.log(`已下载索引：磁盘上识别到 ${map.size} 个作品`);
+    return map;
+  } catch (err) {
+    console.error('loadDownloadsIndex failed:', err && err.message);
+    return state.downloadedIndex;
+  }
 }
 
 /** 「已下载集合」的签名，用来判断是否需要因为下载完成而刷新列表 */
@@ -232,12 +264,14 @@ function rowHtml(it, nested) {
   if (dur) meta.push(`<span>⏱ ${dur}</span>`);
   if (it.viewCount != null) meta.push(`<span>👁 ${fmtCount(it.viewCount)}</span>`);
   if (it.playlistTitle) meta.push(`<span>📚 ${esc(it.playlistTitle)}</span>`);
-  const doneInQueue = state.queue.find((q) => q.key === it.id && (q.status === 'done' || q.status === 'skipped'));
-  if (doneInQueue) meta.push('<span class="badge done">已下载</span>');
+  // 「已下载」标记以 doneKeys() 为准（队列 + 磁盘边车索引），不再只看队列状态
+  if (doneKeys().has(it.id)) meta.push('<span class="badge done">已下载</span>');
 
   return `<div class="row ${selected ? 'selected' : ''} ${nested ? 'nested' : ''}" data-id="${esc(it.id)}">
     <input type="checkbox" ${selected ? 'checked' : ''} data-check="${esc(it.id)}" />
-    <img class="row-thumb" loading="lazy" src="${esc(it.thumbnail || '')}" />
+    <img class="row-thumb" loading="lazy" src="${esc(it.thumbnail || '')}" data-preview="${esc(
+      it.id
+    )}" title="点击查看详情" />
     <div class="row-main">
       <div class="row-title">${esc(it.title)}${badges.length ? ' ' + badges.join(' ') : ''}</div>
       <div class="row-meta">${meta.join('')}</div>
@@ -655,6 +689,135 @@ async function loadFontList() {
   }
 }
 
+/* ==================== 作品详情预览 ==================== */
+
+/**
+ * 点封面打开详情。数据分两步来，先出再补：
+ *   1. 列表里已有的（标题/封面/播放量/时长）→ 立即渲染，不用等网络
+ *   2. 已下载过的 → 读本地边车文件，补上发布时间等
+ *   3. 联网拉完整信息 → 补上**文案**（列表用的 flat 数据不含文案，只能按需再拉一次）
+ *
+ * pvSeq 是「在途请求作废」计数器：连点几个封面或中途关掉时，
+ * 早先的请求回来得晚，不能让它覆盖掉当前正在看的那个。
+ */
+let pvSeq = 0;
+let pvData = {};
+
+function fmtUploadDate(s) {
+  const m = String(s || '').match(/^(\d{4})(\d{2})(\d{2})$/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : String(s || '');
+}
+
+function closePreview() {
+  pvSeq++;
+  $('previewModal').classList.add('hidden');
+}
+
+function renderPreview(patch) {
+  pvData = Object.assign({}, pvData, patch || {});
+  const d = pvData;
+  const cover = $('pvCover');
+  if (d.thumbnail) {
+    cover.src = d.thumbnail;
+    cover.style.visibility = 'visible';
+  } else {
+    cover.removeAttribute('src');
+    cover.style.visibility = 'hidden';
+  }
+  $('pvTitle').textContent = d.title || '—';
+
+  const meta = [];
+  if (d.channel) meta.push(`<span>📺 ${esc(d.channel)}</span>`);
+  if (d.uploadDate) meta.push(`<span>📅 ${esc(fmtUploadDate(d.uploadDate))}</span>`);
+  if (d.viewCount != null) meta.push(`<span>👁 ${fmtCount(d.viewCount)} 次播放</span>`);
+  if (d.likeCount != null) meta.push(`<span>👍 ${fmtCount(d.likeCount)}</span>`);
+  if (d.duration) meta.push(`<span>⏱ ${fmtDuration(d.duration)}</span>`);
+  if (d.id) meta.push(`<span class="muted">ID ${esc(d.id)}</span>`);
+  $('pvMeta').innerHTML = meta.join('');
+
+  const local = state.downloadedIndex.get(d.id || '');
+  $('pvOpenFolder').classList.toggle('hidden', !local);
+  $('pvYoutube').href = d.webpageUrl || d.url || '#';
+  $('pvDownload').textContent = local || doneKeys().has(d.id) ? '重新下载' : '下载这个';
+}
+
+async function openPreview(id) {
+  const it = itemById(id);
+  if (!it) return;
+  const seq = ++pvSeq;
+  pvData = {};
+  let localDescShown = false;
+  $('previewModal').classList.remove('hidden');
+  $('pvDesc').innerHTML = '<span class="spinner"></span> 正在读取完整信息…';
+  // 第一步：列表里已有的数据，秒出
+  renderPreview({
+    id: it.id,
+    title: it.title,
+    thumbnail: it.thumbnail,
+    viewCount: it.viewCount,
+    duration: it.duration,
+    url: it.url,
+    webpageUrl: it.url,
+    channel: it.channel || '',
+  });
+
+  // 第二步：下载过的读本地边车（发布时间、播放量、**文案**都在里面）
+  try {
+    const loc = await api.downloads.local(id);
+    if (seq !== pvSeq) return;
+    if (loc && loc.ok && loc.rec) {
+      const rec = loc.rec;
+      renderPreview({
+        uploadDate: rec.uploadDate,
+        channel: rec.channel || pvData.channel,
+        viewCount: rec.viewCount != null ? rec.viewCount : pvData.viewCount,
+        likeCount: rec.likeCount,
+      });
+      // 边车里有文案就直接用，省掉一次联网；没有才等下面的网络请求
+      if (rec.description) {
+        $('pvDesc').textContent =
+          String(rec.description).trim() + (rec.descriptionTruncated ? '\n\n…（文案过长，此处已截断）' : '');
+        localDescShown = true;
+      }
+    }
+  } catch (_) {}
+
+  // 第三步：联网拉完整详情（含最新文案与播放量）
+  const res = await api.downloads.details(it.url);
+  if (seq !== pvSeq) return; // 已经切走或关掉了，丢弃这次结果
+  if (res && res.ok && res.details) {
+    const d = res.details;
+    renderPreview({
+      id: d.id || pvData.id,
+      title: d.title || pvData.title,
+      channel: d.channel || pvData.channel,
+      uploadDate: d.uploadDate || pvData.uploadDate,
+      viewCount: d.viewCount != null ? d.viewCount : pvData.viewCount,
+      likeCount: d.likeCount || pvData.likeCount,
+      duration: d.duration || pvData.duration,
+      thumbnail: d.thumbnail || pvData.thumbnail,
+      webpageUrl: d.webpageUrl || pvData.url,
+    });
+    const text = String(d.description || '').trim();
+    if (text) $('pvDesc').textContent = text + (d.descriptionTruncated ? '\n\n…（文案过长，此处已截断）' : '');
+    else if (!localDescShown) $('pvDesc').textContent = '（该视频没有文案）';
+  } else if (!localDescShown) {
+    // 联网失败（常见于 YouTube 风控）——本地边车也没有文案时才报错
+    $('pvDesc').textContent = friendlyDetailError(res && res.error);
+  }
+}
+
+/** 把 yt-dlp 的原始报错翻译成人话（尤其风控那条，原文有十几行） */
+function friendlyDetailError(err) {
+  const s = String(err || '');
+  if (/Sign in to confirm|not a bot/i.test(s)) {
+    return 'YouTube 要求验证「你不是机器人」，暂时读不到文案。\n等几分钟再试，或在设置里配置 Cookies 文件。';
+  }
+  if (/\b429\b|Too Many Requests/i.test(s)) return 'YouTube 限流了（429），过几分钟再试。';
+  if (/Video unavailable|Private video|members-only/i.test(s)) return '该视频不可访问（可能是私享或会员专属）。';
+  return '读取完整信息失败：' + s.slice(0, 200);
+}
+
 /* ==================== 最近下载的博主 ==================== */
 
 async function loadRecentChannels() {
@@ -922,6 +1085,13 @@ function bind() {
   });
 
   $('list').addEventListener('click', (e) => {
+    // 点缩略图 = 打开作品详情预览（要放在最前面，否则会被行点击吃掉）
+    const thumb = e.target.closest('[data-preview]');
+    if (thumb) {
+      e.stopPropagation();
+      openPreview(thumb.getAttribute('data-preview'));
+      return;
+    }
     // 播放列表行的处理要放在最前面：展开/收起、整列表勾选
     const plToggle = e.target.closest('[data-pl-toggle]');
     if (plToggle) {
@@ -1139,6 +1309,32 @@ function bind() {
   $('settingsModal').addEventListener('click', (e) => {
     if (e.target === $('settingsModal')) $('settingsModal').classList.add('hidden');
   });
+
+  // ---- 作品详情预览 ----
+  $('btnClosePreview').addEventListener('click', closePreview);
+  $('previewModal').addEventListener('click', (e) => {
+    if (e.target === $('previewModal')) closePreview();
+  });
+  $('pvDownload').addEventListener('click', () => {
+    const it = itemById(pvData.id);
+    closePreview();
+    if (it) enqueue([it]);
+    else toast('找不到该作品的信息，请重新识别一次', 'warn');
+  });
+  $('pvOpenFolder').addEventListener('click', () => {
+    const local = state.downloadedIndex.get(pvData.id || '');
+    if (local && local.videoPath) api.shell.showItem(local.videoPath);
+    else toast('没有找到本地文件', 'warn');
+  });
+  $('pvYoutube').addEventListener('click', (e) => {
+    // 直接点 <a> 会把应用窗口导航到 YouTube，必须拦下来交给系统浏览器
+    e.preventDefault();
+    const u = pvData.webpageUrl || pvData.url;
+    if (u) api.shell.openExternal(u);
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !$('previewModal').classList.contains('hidden')) closePreview();
+  });
   $('btnSetPickDir').addEventListener('click', async () => {
     const p = await api.dialog.pickFolder($('setOutputDir').value);
     if (p) $('setOutputDir').value = p;
@@ -1246,12 +1442,15 @@ function bind() {
   api.queue.onChanged((payload) => {
     state.queue = payload.items || [];
     state.stats = payload.stats || {};
+    invalidateDoneCache();
     renderQueue();
-    // 有任务完成时博主下载数会变，顺带刷新首页的快捷入口
+    // 有任务完成时：博主下载数会变，磁盘上也会多出边车文件，两处都刷新
     const doneCount = state.queue.filter((q) => q.status === 'done' || q.status === 'skipped').length;
     if (doneCount !== lastDoneCount) {
       lastDoneCount = doneCount;
       loadRecentChannels();
+      // 重新扫一遍边车索引，让「已下载」标记与列表过滤立即反映最新状态
+      loadDownloadsIndex(true).then(() => renderList(true));
     }
     // 开着「仅显示未下载」时，某个视频下载完成后要把它从列表里摘掉
     if (state.showOnlyUndownloaded) {
@@ -1307,6 +1506,7 @@ async function enqueue(items) {
   renderQueue();
   await loadRecentChannels();
   loadFontList();
+  await loadDownloadsIndex();
 
   const info = await api.info();
   if (!info.isPackaged) {

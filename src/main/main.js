@@ -16,6 +16,7 @@ const study = require('./study');
 const studyLlm = require('./study/llm');
 const secret = require('./study/secret');
 const channelsStore = require('./channels-store');
+const downloadsIndex = require('./downloads-index');
 const queueMod = require('./queue');
 const { DownloadQueue } = queueMod;
 
@@ -564,6 +565,60 @@ function registerIpc() {
     }
   });
 
+  // ---- 已下载索引（按视频 ID 识别本地文件）----
+  /**
+   * 返回本地已下载的作品 { id: {title, videoPath, ...} }。
+   * 完全以磁盘上的边车文件为准 —— 队列被清空、换机器、重装都不影响识别。
+   */
+  ipcMain.handle('downloads:index', (_e, opts) => {
+    try {
+      const settings = settingsStore.load();
+      const map = downloadsIndex.lookupAll((opts && opts.dir) || settings.outputDir, {
+        ttl: opts && opts.fresh ? 0 : undefined,
+      });
+      const list = [];
+      for (const [id, rec] of map) {
+        list.push({
+          id,
+          title: rec.title || '',
+          videoPath: rec.videoPath,
+          uploadDate: rec.uploadDate || '',
+          viewCount: rec.viewCount == null ? null : rec.viewCount,
+          duration: rec.duration == null ? null : rec.duration,
+        });
+      }
+      return { ok: true, list, dir: (opts && opts.dir) || settings.outputDir };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err), list: [] };
+    }
+  });
+
+  /** 单个视频的本地边车信息（有则秒出，用于详情预览先渲染一部分） */
+  ipcMain.handle('downloads:local', (_e, { id }) => {
+    try {
+      const settings = settingsStore.load();
+      const map = downloadsIndex.lookupAll(settings.outputDir);
+      const rec = map.get(String(id || ''));
+      return rec ? { ok: true, rec } : { ok: false };
+    } catch (_) {
+      return { ok: false };
+    }
+  });
+
+  /** 按需拉取作品详情（列表用的 flat 数据不含文案，只能点开时再拉） */
+  ipcMain.handle('video:details', async (_e, { url }) => {
+    const settings = settingsStore.load();
+    const bin = paths.ytDlpPath(settings);
+    if (!bin) return { ok: false, error: '未找到 yt-dlp.exe' };
+    if (!url) return { ok: false, error: '缺少视频地址' };
+    try {
+      const r = await channel.videoDetails(bin, url);
+      return r;
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err).slice(0, 300) };
+    }
+  });
+
   // ---- 最近下载的博主（首页快捷入口）----
   ipcMain.handle('channels:top', (_e, limit) => {
     try {
@@ -626,6 +681,13 @@ function registerIpc() {
   });
   ipcMain.handle('shell:show-item', (_e, p) => {
     if (p && fs.existsSync(p)) shell.showItemInFolder(p);
+    return true;
+  });
+  /** 用系统默认浏览器打开外链（渲染进程里直接点 <a> 会把应用窗口导航走） */
+  ipcMain.handle('shell:open-external', (_e, url) => {
+    const u = String(url || '');
+    if (!/^https?:\/\//i.test(u)) return false;
+    shell.openExternal(u);
     return true;
   });
 }

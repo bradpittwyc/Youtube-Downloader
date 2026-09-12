@@ -421,9 +421,47 @@ async function enumeratePlaylist(bin, url, opts = {}) {
   };
 }
 
-/** 单个视频的元信息（用于粘贴单个视频链接的场景） */
-async function probeVideo(bin, url, opts = {}) {
+/**
+ * 拉取单个视频的完整详情（作品详情预览用）。
+ * 列表页用的是 --flat-playlist，**不含文案**，所以只能点开时按需再拉一次。
+ */
+async function videoDetails(bin, url, opts = {}) {
   const args = BASE_FLAGS.concat(['--dump-single-json', '--no-playlist', url]);
+  const res = await run(bin, args, { onChild: opts.onChild });
+  if (res.code !== 0) {
+    return { ok: false, error: extractErrors(res.stderr) || '视频信息获取失败' };
+  }
+  try {
+    const j = JSON.parse(res.stdout.trim());
+    const desc = String(j.description || '');
+    return {
+      ok: true,
+      details: {
+        id: j.id || '',
+        title: j.title || '',
+        channel: j.channel || j.uploader || '',
+        channelUrl: j.channel_url || j.uploader_url || '',
+        uploadDate: j.upload_date || '',
+        releaseDate: j.release_date || '',
+        viewCount: typeof j.view_count === 'number' ? j.view_count : null,
+        likeCount: typeof j.like_count === 'number' ? j.like_count : null,
+        commentCount: typeof j.comment_count === 'number' ? j.comment_count : null,
+        duration: typeof j.duration === 'number' ? j.duration : null,
+        description: desc,
+        // 文案可能非常长（含大量链接），截断以免把界面撑爆
+        descriptionTruncated: desc.length > 8000,
+        thumbnail: j.thumbnail || thumbFor(j.id || ''),
+        webpageUrl: j.webpage_url || url,
+        liveStatus: j.live_status || null,
+      },
+    };
+  } catch (err) {
+    return { ok: false, error: '解析视频信息失败：' + (err && err.message) };
+  }
+}
+
+/** 单个视频的元信息（用于粘贴单个视频链接的场景） */
+async function probeVideo(bin, url, opts = {}) {  const args = BASE_FLAGS.concat(['--dump-single-json', '--no-playlist', url]);
   const res = await run(bin, args, { onChild: opts.onChild });
   if (res.code !== 0) return { ok: false, error: extractErrors(res.stderr) || '视频信息获取失败' };
   try {
@@ -455,6 +493,7 @@ module.exports = {
   enumerateChannel,
   enumeratePlaylist,
   playlistItems,
+  videoDetails,
   probeVideo,
   dumpFlat,
   normalizeEntry,

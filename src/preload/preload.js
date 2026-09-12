@@ -30,6 +30,13 @@ contextBridge.exposeInMainWorld('api', {
     list: () => ipcRenderer.invoke('fonts:list'),
   },
 
+  /** 已下载索引（按视频 ID 识别本地文件）与作品详情 */
+  downloads: {
+    index: (opts) => ipcRenderer.invoke('downloads:index', opts),
+    local: (id) => ipcRenderer.invoke('downloads:local', { id }),
+    details: (url) => ipcRenderer.invoke('video:details', { url }),
+  },
+
   dialog: {
     pickFolder: (current) => ipcRenderer.invoke('dialog:pickFolder', current),
     pickFile: () => ipcRenderer.invoke('dialog:pickFile'),
@@ -72,5 +79,6 @@ contextBridge.exposeInMainWorld('api', {
   shell: {
     openPath: (p) => ipcRenderer.invoke('shell:open-path', p),
     showItem: (p) => ipcRenderer.invoke('shell:show-item', p),
+    openExternal: (url) => ipcRenderer.invoke('shell:open-external', url),
   },
 });
