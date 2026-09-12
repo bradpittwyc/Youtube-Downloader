@@ -141,7 +141,7 @@ Word 文档包含：
 ```bash
 npm install          # 安装依赖（首次会下载 Electron 运行时）
 npm start            # 开发模式运行
-npm test             # 运行集成测试（真实联网，54 项）
+npm test             # 运行集成测试（真实联网、跑得慢，70+ 项断言）
 npm run dist         # 打包出 NSIS 安装包 + 免安装版
 npm run pack         # 只生成未打包目录 dist/win-unpacked
 ```
@@ -150,7 +150,7 @@ npm run pack         # 只生成未打包目录 dist/win-unpacked
 
 | 脚本 | 作用 |
 |---|---|
-| `tools/integration-test.js` | 54 项集成测试：链接解析、真实频道枚举、MP3 提取、暂停/断点续传、**"部分流已存在"误判回归**、错误处理、编码乱码回归。用 mock 掉 `electron` 模块直接驱动 `src/main` 的真实代码 |
+| `tools/integration-test.js` | 70+ 项断言的集成测试：链接解析、真实频道枚举、MP3 提取、暂停/断点续传、**"部分流已存在"误判回归**、错误处理、编码乱码回归。用 mock 掉 `electron` 模块直接驱动 `src/main` 的真实代码。**会真实联网，跑一次可能超过 5 分钟**（`YTLD_QUICK=1` 加速），验证小改动时别跑它 |
 | `tools/ui-scenario-a.js` | 真实 DOM 事件驱动：粘贴频道 → 识别 → 切分类 → 勾选（验证渲染层↔preload↔主进程 完整接线） |
 | `tools/ui-scenario-b.js` | 真实 DOM 事件驱动：单个视频 → 选画质 → 开始下载 → 观察队列进度 |
 | `tools/ui-scenario-c.js` | 打包后（`app.isPackaged=true`）端到端验证 |
@@ -177,7 +177,7 @@ $env:YTDL_DEV_EXEC=1
 
 远程仓库：**https://github.com/bradpittwyc/Youtube-Downloader**（私有）
 
-每个版本都打了 git tag（`v1.0.0` … `v1.8.2`，共 20 个），**全部已推送到远程**。
+每个版本都打了 git tag（`v1.0.0` 起，**以 `git tag -l` 的实际数量为准**），**全部已推送到远程**。
 `releases/`、`dist/`、`node_modules/` 都被 `.gitignore` 排除，**不会**上传 ——
 也就是说 **GitHub 上只有源码和 tag，没有构建好的 exe**。
 
@@ -208,17 +208,24 @@ git switch -c rollback-1.7   # 或基于它开分支继续改
 ### 发版流程
 
 ```powershell
-# 1. 改 package.json 的 version
-# 2. 提交
-git add -A; git commit -m "v1.9.0: ..."
+# 1. 改 package.json 的 version，并在 CHANGELOG.md 顶部加一条
+# 2. 提交（提交信息写进临时文件再用 -F 传，见下方注意）
+git add -A; git commit -F commit-msg.txt
 # 3. 打 tag（已配置 push.followTags=true，推送时会自动带上 tag）
-git tag -a v1.9.0 -m "v1.9.0 ..."
+git tag -a v1.13.0 -m "v1.13.0 ..."
 git push
 # 4. 构建（产物留在 dist\，不必再归档到 releases\）
 npm run dist
 ```
 
-> **注意**：`push.followTags` 只推送「指向已推送提交」的 tag。
+> **注意 1（构建前先关掉 App）**：程序在运行时构建会报
+> `EPERM: operation not permitted, unlink 'dist\win-unpacked\dxcompiler.dll'`。
+> 先 `Stop-Process` 掉再构建，并等几秒让文件句柄释放。
+>
+> **注意 2（提交信息别用 `-m`）**：PowerShell 会把中文全角引号 `""` 当作字符串结束符，
+> 导致语法错误。把信息写进临时文件，用 `git commit -F <文件>`。
+
+> **注意 3**：`push.followTags` 只推送「指向已推送提交」的 tag。
 > 打完 tag 后务必确认 `git ls-remote --tags origin` 里有它 ——
 > 曾经踩过 `gh repo create --push` 只推分支、**20 个 tag 一个都没上去**的坑。
 
@@ -289,7 +296,8 @@ npm run dist
     回归测试见 T7（不只是断言"有音频轨"，还会真正尝试解码音频流）。
 
 13. **PowerShell 的 `Test-Path` / `Get-Item` 默认把 `[` `]` 当通配符**
-    而本工具的默认文件名模板是 `%(title)s [%(id)s].%(ext)s`，几乎每个文件名都带方括号。
+    而默认文件名模板是 `%(title)s [%(upload_date>%Y-%m-%d)s].%(ext)s`，几乎每个文件名都带方括号
+    （注：早期版本用的是 `[%(id)s]`，已改成日期；方括号的坑不变）。
     在 PowerShell 脚本里判断这类路径必须用 `-LiteralPath`，否则会得到"文件明明存在却判断为不存在"的假象。
     （调试期间因此产生过两次误导性结论：`.part` 文件"凭空消失"、ffmpeg 转换"失败"。Node 的 `fs` 没有这个问题。）
 
@@ -304,6 +312,18 @@ npm run dist
 - 会员专属／年龄限制／触发机器人验证的内容需要自行提供 `cookies.txt`（设置里可选）
 - v1.0 未包含字幕下载、播放列表批量按分P重命名等进阶功能
 - YouTube 改版可能导致内置 yt-dlp 失效，届时用设置里的「一键更新 yt-dlp」即可
+
+---
+
+## 给 AI 助手
+
+如果你是用 AI 助手来改这个项目，**动手前请先读 `AGENTS.md`**。那里写了 README 里没有、
+但一定会浪费时间的几件事：
+
+- **环境陷阱**：`ELECTRON_RUN_AS_NODE` 会让打包版"打不开"；App 没关就构建会 `EPERM`；
+  PowerShell 5.1 的 BOM / 方括号通配符 / 全角引号等
+- **更快的验证循环**：不用每次打包 2 分钟，用 `--exec` 钩子几秒就能验证界面改动
+- **项目约定**：提交信息怎么传、发版流程、以及作者的验证标准
 
 ---
 
