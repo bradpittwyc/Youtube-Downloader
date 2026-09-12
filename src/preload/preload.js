@@ -43,6 +43,19 @@ contextBridge.exposeInMainWorld('api', {
     test: (patch) => ipcRenderer.invoke('cookies:test', patch),
   },
 
+  /** 网络诊断：出口 IP 是不是机房、本机有没有代理、yt-dlp 能不能通 */
+  net: {
+    diagnose: () => ipcRenderer.invoke('net:diagnose'),
+  },
+
+  /** 自动关机 */
+  power: {
+    state: () => ipcRenderer.invoke('power:state'),
+    cancel: () => ipcRenderer.invoke('power:cancel'),
+    reset: () => ipcRenderer.invoke('power:reset'),
+    onState: (cb) => on('power:state', cb),
+  },
+
   dialog: {
     pickFolder: (current) => ipcRenderer.invoke('dialog:pickFolder', current),
     pickFile: () => ipcRenderer.invoke('dialog:pickFile'),

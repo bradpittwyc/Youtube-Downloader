@@ -104,6 +104,16 @@ const DEFAULTS = {
   ytDlpPath: '',
   ffmpegPath: '',
   autoRetry: 3,
+  /**
+   * 全部任务跑完后自动关机。
+   * 睡前挂一批下载、下完自动关机是常见用法。
+   * 默认关闭 —— 这是会关掉整台机器的操作，必须用户明确打开。
+   */
+  shutdownAfterDone: false,
+  /** 关机前的等待秒数，这段时间内可以取消 */
+  shutdownDelaySec: 60,
+  /** 有失败任务时是否也关机（默认也关：重试已经用完了，留着也没意义） */
+  shutdownEvenIfFailed: true,
   // 每个标签页最多识别多少个内容（0 = 不限制）。
   //
   // 【为什么默认不是 0】实测 @marvel 有一万多个内容，全部翻完要 3 分 13 秒，

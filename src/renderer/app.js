@@ -983,7 +983,123 @@ function startRetryTicker() {
   }, 1000);
 }
 
-/* ==================== 最近下载的博主 ==================== */
+/* ==================== 自动关机倒计时 ==================== */
+
+/**
+ * 关机倒计时条。
+ * 必须显眼、且必须能一键取消 —— 用户可能只是顺手开了开关，
+ * 结果被电脑突然关掉、没保存的东西就没了。
+ */
+let sdTimer = null;
+
+function renderShutdownBar(st) {
+  const bar = $('shutdownBar');
+  if (!bar) return;
+  if (!st || !st.scheduled) {
+    bar.classList.add('hidden');
+    if (sdTimer) {
+      clearInterval(sdTimer);
+      sdTimer = null;
+    }
+    return;
+  }
+  bar.classList.remove('hidden');
+  // 用本地时间戳自己算剩余秒数，不依赖主进程每秒推送
+  const endsAt = Date.now() + (st.secondsLeft || 0) * 1000;
+  const paint = () => {
+    const left = Math.max(0, Math.round((endsAt - Date.now()) / 1000));
+    $('sdCountdown').textContent = `${left} 秒后关机`;
+  };
+  paint();
+  if (sdTimer) clearInterval(sdTimer);
+  sdTimer = setInterval(paint, 500);
+}
+
+async function initShutdownBar() {
+  try {
+    const r = await api.power.state();
+    if (r && r.state) renderShutdownBar(r.state);
+  } catch (_) {}
+  api.power.onState((st) => {
+    renderShutdownBar(st);
+    if (st && st.canceled) toast('已取消自动关机', 'ok', 4000);
+  });
+  $('btnCancelShutdown').addEventListener('click', async () => {
+    await api.power.cancel();
+    renderShutdownBar(null);
+    toast('已取消自动关机', 'ok', 4000);
+  });
+  $('btnNetDiag').addEventListener('click', runNetDiag);
+}
+
+/* ==================== 网络诊断 ==================== */
+
+/**
+ * 把「为什么下不动」讲成人话。
+ * 最常见的原因是出口 IP 是机房 IP（云服务器/VPS）—— YouTube 对这类 IP 风控极严，
+ * 但用户从一屏英文报错里根本看不出来。
+ */
+async function runNetDiag() {
+  const box = $('netDiagResult');
+  box.classList.remove('hidden');
+  box.innerHTML = '<span class="spinner"></span> 正在诊断（约 10 秒）…';
+  try {
+    const r = await api.net.diagnose();
+    if (!r || !r.ok) {
+      box.textContent = '诊断失败：' + ((r && r.error) || '未知错误');
+      return;
+    }
+    const d = r.report;
+    const rows = [];
+    const geo = d.geo || {};
+    rows.push(
+      `<div class="diag-row"><span class="diag-k">出口 IP</span><span><b>${esc(d.ip || '未知')}</b>${
+        geo.country ? ` · ${esc(geo.country)} ${esc(geo.city || '')}` : ''
+      }</span></div>`
+    );
+    if (geo.org || geo.isp) {
+      rows.push(`<div class="diag-row"><span class="diag-k">网络归属</span><span>${esc(geo.org || geo.isp)}</span></div>`);
+    }
+    rows.push(
+      `<div class="diag-row"><span class="diag-k">IP 类型</span><span class="${
+        d.isDatacenter ? 'diag-warn' : 'diag-ok'
+      }">${d.isDatacenter ? '⚠ 机房 IP（会被 YouTube 重点风控）' : '✅ 非机房 IP'}</span></div>`
+    );
+    rows.push(
+      `<div class="diag-row"><span class="diag-k">本机代理</span><span>${
+        d.proxies && d.proxies.length
+          ? d.proxies.map((p) => `${p.port}（${esc(p.name)}）`).join('、')
+          : '未检测到'
+      }</span></div>`
+    );
+    rows.push(
+      `<div class="diag-row"><span class="diag-k">软件代理</span><span>${
+        d.currentProxy ? esc(d.currentProxy) : '未配置'
+      }</span></div>`
+    );
+    const y = d.ytdlp || {};
+    rows.push(
+      `<div class="diag-row"><span class="diag-k">yt-dlp</span><span class="${
+        y.ok ? 'diag-ok' : 'diag-warn'
+      }">${
+        y.ok
+          ? '✅ 可以读取视频（' + esc(y.title || '') + '）'
+          : y.kind === 'botcheck'
+          ? '⚠ 被风控拦下（Sign in to confirm you’re not a bot）'
+          : '⚠ ' + esc(y.detail || '失败')
+      }</span></div>`
+    );
+    box.innerHTML =
+      rows.join('') +
+      (d.advice && d.advice.length
+        ? `<b style="display:block;margin-top:10px">建议</b><ul>${d.advice
+            .map((a) => `<li>${esc(a)}</li>`)
+            .join('')}</ul>`
+        : '');
+  } catch (err) {
+    box.textContent = '诊断失败：' + (err && err.message);
+  }
+}
 
 /* ==================== 识别 ==================== */
 
@@ -1114,6 +1230,8 @@ async function loadSettingsToForm() {
   $('setOutputDir').value = s.outputDir || '';
   $('setConcurrency').value = s.concurrency || 2;
   $('setAutoRetry').value = s.autoRetry == null ? 3 : s.autoRetry;
+  $('setShutdownAfterDone').checked = s.shutdownAfterDone === true;
+  $('setShutdownEvenIfFailed').checked = s.shutdownEvenIfFailed !== false;
   $('setFilename').value = s.filenameTemplate || '';
   $('setOrganizeInFolder').checked = s.organizeInFolder !== false;
   $('setChannelFolderName').value = s.channelFolderName || 'handle';
@@ -1548,6 +1666,8 @@ function bind() {
       outputDir: $('setOutputDir').value.trim(),
       concurrency: Number($('setConcurrency').value) || 2,
       autoRetry: Number($('setAutoRetry').value) || 0,
+      shutdownAfterDone: $('setShutdownAfterDone').checked,
+      shutdownEvenIfFailed: $('setShutdownEvenIfFailed').checked,
       filenameTemplate: $('setFilename').value.trim() || '%(title)s [%(id)s].%(ext)s',
       organizeInFolder: $('setOrganizeInFolder').checked,
       channelFolderName: $('setChannelFolderName').value,
@@ -1725,6 +1845,7 @@ async function enqueue(items) {
   loadFontList();
   await loadDownloadsIndex();
   startRetryTicker();
+  initShutdownBar();
 
   const info = await api.info();
   if (!info.isPackaged) {

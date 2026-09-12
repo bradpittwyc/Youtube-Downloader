@@ -17,6 +17,8 @@ const studyLlm = require('./study/llm');
 const secret = require('./study/secret');
 const channelsStore = require('./channels-store');
 const categories = require('./categories');
+const netdiag = require('./netdiag');
+const power = require('./power');
 const downloadsIndex = require('./downloads-index');
 const { authArgs, detectBrowsers, authSummary, explainCookieError } = require('./ytdlp-auth');
 const quoteCard = require('./study/quote-card');
@@ -779,6 +781,44 @@ function registerIpc() {
     }
   });
 
+  // ---- 自动关机 ----
+  /** 当前关机状态（是否已排定、还剩几秒） */
+  ipcMain.handle('power:state', () => ({ ok: true, state: power.state() }));
+  /** 取消已排定的关机 */
+  ipcMain.handle('power:cancel', () => {
+    const was = power.cancel();
+    return { ok: true, canceled: was, state: power.state() };
+  });
+  /** 用户在设置里关掉开关时清干净 */
+  ipcMain.handle('power:reset', () => {
+    power.reset();
+    return { ok: true, state: power.state() };
+  });
+
+  // ---- 网络诊断 ----
+  /**
+   * 把「为什么下不动」变成一句人话。
+   * 尤其要能识别「出口是机房 IP」——那是 YouTube 风控最常见的原因，
+   * 但用户从一屏英文报错里根本看不出来。
+   */
+  ipcMain.handle('net:diagnose', async () => {
+    const settings = settingsStore.load();
+    const bin = paths.ytDlpPath(settings);
+    try {
+      return {
+        ok: true,
+        report: await netdiag.diagnose({
+          bin,
+          run: (b, args) => ytdlp.run(b, args),
+          settings,
+          probeUrl: 'https://www.youtube.com/watch?v=jNQXAC9IVRw',
+        }),
+      };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err) };
+    }
+  });
+
   /** 系统已安装的字体族名（用于字幕字体选择） */  ipcMain.handle('fonts:list', () => {
     try {
       return { ok: true, list: listSystemFonts() };
@@ -1094,7 +1134,18 @@ app.whenReady().then(() => {
   queue.load();
   queue.on('changed', () => {
     sendToRenderer('queue:changed', { items: queue.snapshot(), stats: queue.stats() });
+    // 自动关机：每轮队列变化都判断一次「是不是全部干完了」
+    try {
+      const all = Array.from(queue.items.values());
+      const busy = all.filter((i) => power.BUSY.has(i.status)).length;
+      const failed = all.filter((i) => i.status === 'error').length;
+      power.onQueueChange(busy, settingsStore.load(), failed);
+    } catch (err) {
+      console.error('[power] 自动关机判断失败:', err && err.message);
+    }
   });
+  // 关机状态变化（排定 / 取消）推给界面，好让用户能一键取消
+  power.setListener((st) => sendToRenderer('power:state', st));
   registerIpc();
   createWindow();
   backfillChannelHistory();

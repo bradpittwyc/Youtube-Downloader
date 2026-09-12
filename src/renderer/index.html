@@ -146,6 +146,16 @@
           </div>
         </div>
         <div id="queueStats" class="queue-stats"></div>
+
+        <!-- 自动关机倒计时：必须显眼 + 一键取消，否则用户会被迫看着电脑关掉 -->
+        <div id="shutdownBar" class="shutdown-bar hidden">
+          <div class="sd-text">
+            <b>全部任务已完成</b>
+            <span id="sdCountdown"></span>
+          </div>
+          <button id="btnCancelShutdown" class="btn tiny danger">取消关机</button>
+        </div>
+
         <div id="queueList" class="queue-list"></div>
         <div id="queueEmpty" class="queue-empty">队列为空<br /><span class="muted">勾选视频后点「开始下载」</span></div>
       </aside>
@@ -226,6 +236,20 @@
               <label>失败自动重试次数</label>
               <input id="setAutoRetry" type="number" min="0" max="10" step="1" />
             </div>
+          </div>
+
+          <div class="setting-row">
+            <label>任务完成后</label>
+            <label class="check"
+              ><input type="checkbox" id="setShutdownAfterDone" /><span
+                ><b>全部任务完成后自动关机</b>（睡前挂一批下载用；会留 60 秒倒计时，随时可以在队列上方取消）</span
+              ></label
+            >
+            <label class="check" style="margin-top: 6px"
+              ><input type="checkbox" id="setShutdownEvenIfFailed" /><span
+                >有失败任务时也关机（重试已经用完，留着也不会自己好）</span
+              ></label
+            >
           </div>
 
           <div class="setting-row">
@@ -450,11 +474,19 @@
             <div>
               <label>限速（留空不限速）</label>
               <input id="setRateLimit" type="text" placeholder="例如 2M" spellcheck="false" />
-            </div>
-            <div>
+            </div>            <div>
               <label>代理（可选）</label>
               <input id="setProxy" type="text" placeholder="http://127.0.0.1:7890" spellcheck="false" />
             </div>
+          </div>
+
+          <div class="setting-row">
+            <label>网络诊断</label>
+            <div class="inline" style="align-items: center; gap: 10px">
+              <button id="btnNetDiag" class="btn tiny">开始诊断</button>
+              <span class="muted">查出口 IP 是不是机房、本机有没有代理、yt-dlp 通不通</span>
+            </div>
+            <div id="netDiagResult" class="diag-box hidden"></div>
           </div>
 
           <div class="setting-row">
