@@ -235,8 +235,10 @@ async function enumerateChannel(bin, channelBase, opts = {}) {
 
     if (!res.ok) {
       if (res.missing) {
+        // 「该频道没有 XX 标签页」不是警告，是常态 —— 大多数频道本来就没有 Podcasts / Live。
+        // 只记进 tabStatus（分类标签要靠它显示"缺这个标签"），不再往 warnings 里塞，
+        // 否则列表上方会挂一排黄条纯属噪音。
         result.tabStatus[sec] = 'missing';
-        result.warnings.push({ tab: sec, level: 'info', message: `该频道没有 ${TAB_LABEL[sec]} 标签页` });
       } else {
         result.tabStatus[sec] = 'error';
         result.warnings.push({ tab: sec, level: 'error', message: res.error });

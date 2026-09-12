@@ -1,6 +1,6 @@
 {
   "name": "youtube-downloader",
-  "version": "1.15.0",
+  "version": "1.15.1",
   "description": "YouTube 频道批量下载器 + 中英对照学习文档生成",
   "main": "src/main/main.js",
   "author": "youtube-downloader",
