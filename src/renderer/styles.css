@@ -418,60 +418,139 @@ input::placeholder {
   gap: 14px;
   background: rgba(9, 11, 15, 0.86);
   backdrop-filter: blur(3px);
-  perspective: 760px;
 }
+/* 贾维斯球：HUD 风格 —— 由外到内是
+   外发光 → 点状环 → 主刻度环 → 次刻度环 → 外细线环 → 旋转弧刃 ×2 → 内环 → 发光核心。
+   刻度/点阵都用 repeating-conic-gradient 画，再用 radial-gradient 遮罩裁成"环带"，
+   这样不用任何图片或 SVG，纯 CSS 就能做出仪表盘的层次。 */
 .jv-orb {
   position: relative;
-  width: 138px;
-  height: 138px;
-  transform-style: preserve-3d;
-  animation: jv-tilt 7s ease-in-out infinite;
+  width: 156px;
+  height: 156px;
+  /* 外发光要克制：太重会把刻度环和弧刃糊成一团，失去 HUD 的锐利感（实测对比过） */
+  filter: drop-shadow(0 0 9px rgba(79, 209, 255, 0.22));
 }
-.jv-ring {
+/* 注意：这里【不能】写 inset: 0。
+   .jv-orb > span 的特异性(0,1,1) 高于单独类名(0,1,0)，
+   一旦写了 inset:0，下面 .jv-core { inset:38% } 之类的定位会全部失效，
+   九层图元全部塌在 inset:0 上、互相盖住（实测踩过：只剩一个白球）。 */
+.jv-orb > span {
   position: absolute;
+  border-radius: 50%;
+}
+/* 需要铺满整层的显式声明 */
+.jv-dots,
+.jv-ticks,
+.jv-blade {
   inset: 0;
-  border-radius: 50%;
-  border: 2px solid transparent;
-  animation: jv-spin 1.8s linear infinite;
 }
-/* rotate 独立属性做倾斜，transform 交给动画转 —— 两者会叠加。
-   这样三个环就能绕不同轴转，形成陀螺仪（而不是三个平面的同心圆）。 */
-.jv-r1 {
-  border-top-color: #4fd1ff;
-  border-bottom-color: rgba(79, 209, 255, 0.45);
+
+/* 外发光：范围收小，只做氛围不抢戏 */
+.jv-halo {
+  inset: -18px;
+  background: radial-gradient(circle closest-side, rgba(79, 209, 255, 0.18), rgba(79, 209, 255, 0.05) 60%, transparent 72%);
+  animation: jv-pulse 2.6s ease-in-out infinite;
 }
-.jv-r2 {
-  rotate: x 72deg;
-  border-left-color: #ffd166;
-  border-right-color: rgba(255, 209, 102, 0.4);
-  animation-duration: 2.6s;
-  animation-direction: reverse;
+
+/* 最外圈：细密点阵，缓慢反向转 */
+.jv-dots {
+  background: repeating-conic-gradient(
+    from 0deg,
+    rgba(150, 226, 255, 0.9) 0deg 1deg,
+    transparent 1deg 8deg
+  );
+  -webkit-mask: radial-gradient(circle closest-side, transparent 0 91%, #000 91.5% 98%, transparent 98.5%);
+  mask: radial-gradient(circle closest-side, transparent 0 91%, #000 91.5% 98%, transparent 98.5%);
+  animation: jv-spin 26s linear infinite reverse;
 }
-.jv-r3 {
-  rotate: y 72deg;
-  border-top-color: #8fb4ff;
-  animation-duration: 1.25s;
+
+/* 主刻度环：每 30° 一根长刻度 */
+.jv-ticks {
+  background: repeating-conic-gradient(
+    from 0deg,
+    rgba(170, 232, 255, 0.95) 0deg 0.9deg,
+    transparent 0.9deg 30deg
+  );
+  -webkit-mask: radial-gradient(circle closest-side, transparent 0 76%, #000 76.5% 89%, transparent 89.5%);
+  mask: radial-gradient(circle closest-side, transparent 0 76%, #000 76.5% 89%, transparent 89.5%);
+  animation: jv-spin 40s linear infinite;
 }
-.jv-glow {
-  position: absolute;
-  inset: -20px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(79, 209, 255, 0.22), transparent 66%);
-  animation: jv-pulse 2.4s ease-in-out infinite;
+/* 次刻度环：每 6° 一根短刻度，更暗更短 */
+.jv-ticks-minor {
+  background: repeating-conic-gradient(
+    from 0deg,
+    rgba(120, 200, 240, 0.5) 0deg 0.7deg,
+    transparent 0.7deg 6deg
+  );
+  -webkit-mask: radial-gradient(circle closest-side, transparent 0 79%, #000 79.5% 84%, transparent 84.5%);
+  mask: radial-gradient(circle closest-side, transparent 0 79%, #000 79.5% 84%, transparent 84.5%);
+  animation: jv-spin 60s linear infinite reverse;
 }
+
+/* 细线环 */
+.jv-line {
+  border: 1px solid rgba(110, 200, 245, 0.45);
+}
+.jv-line-outer {
+  inset: 18%;
+}
+.jv-line-inner {
+  inset: 33%;
+  border-color: rgba(110, 200, 245, 0.3);
+}
+
+/* 弧刃：三段扇形，亮部到暗部的过渡要短，否则会糊成一片光晕 */
+.jv-blade {
+  -webkit-mask: radial-gradient(circle closest-side, transparent 0 36.5%, #000 37.2% 59%, transparent 59.8%);
+  mask: radial-gradient(circle closest-side, transparent 0 36.5%, #000 37.2% 59%, transparent 59.8%);
+}
+.jv-b1 {
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg 14deg,
+    rgba(190, 245, 255, 1) 32deg,
+    rgba(79, 209, 255, 0.75) 56deg,
+    transparent 68deg,
+    transparent 134deg,
+    rgba(190, 245, 255, 1) 152deg,
+    rgba(79, 209, 255, 0.75) 176deg,
+    transparent 188deg,
+    transparent 254deg,
+    rgba(190, 245, 255, 1) 272deg,
+    rgba(79, 209, 255, 0.75) 296deg,
+    transparent 308deg
+  );
+  animation: jv-spin 3.4s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+}
+.jv-b2 {
+  inset: 13%;
+  background: conic-gradient(
+    from 180deg,
+    transparent 0deg 20deg,
+    rgba(225, 250, 255, 0.95) 46deg,
+    rgba(79, 209, 255, 0.6) 74deg,
+    transparent 86deg,
+    transparent 200deg,
+    rgba(225, 250, 255, 0.95) 226deg,
+    rgba(79, 209, 255, 0.6) 254deg,
+    transparent 266deg
+  );
+  animation: jv-spin 5.2s linear infinite reverse;
+}
+
+/* 发光核心：光晕收窄，别盖住外面的弧刃 */
 .jv-core {
-  position: absolute;
-  inset: 45px;
-  border-radius: 50%;
-  background: radial-gradient(circle at 34% 28%, #f2fbff, #4fd1ff 44%, #1b6fa8 74%, #0c2637);
-  box-shadow: 0 0 24px rgba(79, 209, 255, 0.8), 0 0 62px rgba(79, 209, 255, 0.34);
-  animation: jv-pulse 1.7s ease-in-out infinite;
+  inset: 39%;
+  background: radial-gradient(circle at 36% 30%, #ffffff, #d8f4ff 24%, #4fd1ff 55%, #1a6ea8 84%, #0b2333);
+  box-shadow: 0 0 13px rgba(170, 235, 255, 0.95), 0 0 30px rgba(79, 209, 255, 0.42);
+  animation: jv-pulse 1.8s ease-in-out infinite;
 }
 .jv-title {
-  margin-top: 8px;
+  margin-top: 10px;
   font-size: 14px;
-  letter-spacing: 3px;
-  color: #cfe9ff;
+  letter-spacing: 4px;
+  color: #d6ecff;
+  text-shadow: 0 0 14px rgba(79, 209, 255, 0.5);
 }
 .jv-text {
   font-size: 12.5px;
@@ -483,27 +562,18 @@ input::placeholder {
 
 @keyframes jv-spin {
   to {
-    transform: rotateZ(360deg);
+    transform: rotate(360deg);
   }
 }
 @keyframes jv-pulse {
   0%,
   100% {
     transform: scale(1);
-    opacity: 0.92;
+    opacity: 0.9;
   }
   50% {
-    transform: scale(1.07);
+    transform: scale(1.06);
     opacity: 1;
-  }
-}
-@keyframes jv-tilt {
-  0%,
-  100% {
-    transform: rotateX(12deg) rotateZ(0deg);
-  }
-  50% {
-    transform: rotateX(24deg) rotateZ(14deg);
   }
 }
 
