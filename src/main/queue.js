@@ -314,6 +314,24 @@ class DownloadQueue extends EventEmitter {
           item.interrupted = true;
           item.stage = '等待续传';
         }
+        // 上次退出时正在跑「下载后处理」（提取音频 / 抓字幕 / 生成学习文档）→ 必须复位。
+        // 这三件事全都在内存里进行、且【不写中间结果】，绝不可能跨进程存活。
+        // 不复位的话界面会永远停在「翻译 18/93 段」这种冻结状态：
+        // 既不报错、也不结束，用户根本分不清是卡住了还是慢
+        // （实测踩过：打包时杀掉进程，重启后界面一直骗人）。
+        if (item.studying || item.extractingAudio || item.fetchingSubs) {
+          const was = item.studyStage || '';
+          item.studying = false;
+          item.extractingAudio = false;
+          item.fetchingSubs = false;
+          if (item.status === 'done') {
+            item.studyStage = '';
+            item.stage = was
+              ? `已完成 · 上次生成文档中断在「${was}」，可点「生成文档」重新开始`
+              : '已完成 · 上次生成文档中断，可点「生成文档」重新开始';
+          }
+          fixed++;
+        }
         // 自愈：已完成却没记到字幕的任务重新扫一遍磁盘。
         // 老版本因为文件名截断会漏记（字幕其实就躺在视频旁边），
         // 不补回来的话界面上既不显示字幕数、也不给「生成文档」的入口。
