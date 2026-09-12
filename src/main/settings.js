@@ -152,7 +152,16 @@ const DEFAULTS = {
    * .srt 兼容性更好但与 .ass 并存时播放器加载哪个不一定，默认不再生成。
    */
   studyAss: true,
-  studyBilingualSrt: false,
+  /**
+   * 是否同时输出双语 SRT。
+   *
+   * 【为什么默认是 true】ASS 有颜色/描边/精确定位，但**需要支持 ASS 的播放器**；
+   * Windows 11 自带的 Media Player 根本不支持 ASS，只认 SRT。
+   * 只给 ASS 的话，用默认播放器的用户会「一个字幕都看不到」。
+   * 两个都输出最稳妥：播放器支持 ASS 就选 ASS 轨（有颜色），不支持就选 SRT 轨。
+   * 单文件里可以手动切轨，不存在"选错就没了"的问题。
+   */
+  studyBilingualSrt: true,
   assColorEn: '#FFFFFF', // 英文字色（白）
   assColorZh: '#FFD700', // 中文字色（琥珀）
   assOutlineColor: '#000000', // 黑描边
@@ -243,7 +252,11 @@ function load() {
   // 下面这条反向迁移把「被自动关掉」的配置重新打开。
   // 用 bilingualSrtFixed 做标记，之后用户若真的想关，手动关掉不会再被覆盖。
   if (disk.bilingualSrtFixed !== true) {
-    if (disk.studyBilingualSrt === false) {
+    // 【注意】必须判断 !== true，不能只判断 === false。
+    // 老配置里往往【根本没有这个字段】，此时内层条件不成立、
+    // 标记却被打上，于是永远不再修正
+    // （实测踩过：改完之后仍然是只有 ASS、没有 SRT）。
+    if (disk.studyBilingualSrt !== true) {
       disk.studyBilingualSrt = true;
       migrated = true;
       console.log('[settings] 已恢复双语 SRT 输出（ASS 需要支持的播放器，Windows 自带的读不了）');
