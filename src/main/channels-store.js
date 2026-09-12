@@ -50,7 +50,7 @@ function save() {
 
 /**
  * 给某个博主累加下载数（博主不存在则新建）。
- * @param {{url:string,title?:string,avatar?:string}} ref
+ * @param {{url:string,title?:string,avatar?:string,cat?:string,catName?:string}} ref
  * @param {number} [n]
  */
 function bump(ref, n) {
@@ -60,14 +60,57 @@ function bump(ref, n) {
   const inc = Number(n) > 0 ? Number(n) : 1;
   let item = list.find((x) => keyOf(x) === key);
   if (!item) {
-    item = { url: String(ref.url).trim().replace(/\/+$/, ''), title: ref.title || '', avatar: ref.avatar || '', downloads: 0, lastAt: '' };
+    item = {
+      url: String(ref.url).trim().replace(/\/+$/, ''),
+      title: ref.title || '',
+      avatar: ref.avatar || '',
+      cat: '',
+      catName: '',
+      downloads: 0,
+      lastAt: '',
+    };
     list.push(item);
   }
   // 标题/头像可能会更新（例如频道改名、换了头像），有新的就覆盖
   if (ref.title) item.title = ref.title;
   if (ref.avatar) item.avatar = ref.avatar;
+  // 分类也允许后续修正（第一次可能没有标题可依据）
+  if (ref.cat) {
+    item.cat = ref.cat;
+    if (ref.catName) item.catName = ref.catName;
+  }
   item.downloads = (Number(item.downloads) || 0) + inc;
   item.lastAt = new Date().toISOString();
+  save();
+  return item;
+}
+
+/**
+ * 记录/更新某个博主的分类（书签分组用）。
+ * 识别频道时我们手上才有几百条视频标题，那是分类的最佳时机。
+ */
+function setCategory(ref, cat, catName) {
+  const key = keyOf(ref);
+  if (!key || !cat) return null;
+  const list = load();
+  let item = list.find((x) => keyOf(x) === key);
+  if (!item) {
+    // 还没下载过也算「库」里的一员，先建档（下载数 0）
+    item = {
+      url: String(ref.url).trim().replace(/\/+$/, ''),
+      title: (ref && ref.title) || '',
+      avatar: (ref && ref.avatar) || '',
+      cat: '',
+      catName: '',
+      downloads: 0,
+      lastAt: '',
+    };
+    list.push(item);
+  }
+  item.cat = cat;
+  if (catName) item.catName = catName;
+  if (ref && ref.title) item.title = ref.title;
+  if (ref && ref.avatar) item.avatar = ref.avatar;
   save();
   return item;
 }
@@ -100,4 +143,4 @@ function _reset() {
   cache = null;
 }
 
-module.exports = { load, save, bump, top, remove, keyOf, _reset };
+module.exports = { load, save, bump, setCategory, top, remove, keyOf, _reset };

@@ -194,29 +194,38 @@ input::placeholder {
   background: var(--bg-2);
 }
 
-/* ================= 空状态 ================= */
-.empty-state {
+/* ================= 主页（上半粘贴区 + 下半书签库） ================= */
+.home {
   flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 22px 34px 0;
+  overflow: hidden;
+}
+
+/* ---- 上半：hero 靠上排布，不垂直居中 ---- */
+.home-hero {
+  flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 10px;
-  padding: 40px;
+  gap: 9px;
   text-align: center;
+  padding-bottom: 20px;
 }
-/* 空状态的品牌图：用官方 YouTube logo（1.44:1 横长方形，所以给宽度、高度自适应） */
+/* 品牌图：官方 YouTube logo（1.44:1 横长方形，给宽度、高度自适应） */
 .empty-icon {
-  width: 96px;
+  width: 84px;
   height: auto;
-  opacity: 0.9;
+  opacity: 0.92;
   display: block;
 }
-.empty-state h2 {
+.home-hero h2 {
   margin: 0;
   font-size: 19px;
 }
-.empty-state p {
+.home-hero p {
   margin: 0;
   color: var(--text-dim);
   max-width: 560px;
@@ -225,8 +234,8 @@ input::placeholder {
 .hint-grid {
   display: grid;
   grid-template-columns: repeat(2, auto);
-  gap: 8px 22px;
-  margin-top: 16px;
+  gap: 7px 22px;
+  margin-top: 12px;
 }
 .hint-grid > div {
   display: flex;
@@ -244,68 +253,258 @@ input::placeholder {
   font-size: 11.5px;
 }
 
-/* ================= 最近下载的博主 ================= */
-.recent-channels {
-  margin-top: 26px;
-  width: 100%;
-  max-width: 720px;
-}
-.rc-head {
+/* ---- 下半：书签式分页 ---- */
+.home-library {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  align-items: baseline;
-  gap: 10px;
-  font-size: 12.5px;
-  color: var(--text-dim);
-  margin-bottom: 10px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--line);
+  flex-direction: column;
 }
-.rc-list {
+.bm-tabs {
+  flex: 0 0 auto;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  justify-content: center;
+  gap: 4px;
+  /* 关键：往下压 1px 盖住面板上边框，让选中标签和面板连成一体（文件袋的观感） */
+  margin-bottom: -1px;
+  padding-left: 4px;
+  position: relative;
+  z-index: 1;
 }
-.rc-item {
+.bm-tab {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 12px 6px 6px;
+  gap: 5px;
+  padding: 7px 11px 8px;
   background: var(--bg-2);
   border: 1px solid var(--line);
-  border-radius: 24px;
+  border-radius: 10px 10px 0 0;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.14s, color 0.14s;
+  white-space: nowrap;
+}
+.bm-tab:hover {
+  color: var(--text);
+  background: var(--bg-3);
+}
+.bm-tab.on {
+  background: var(--bg-3);
+  color: var(--text);
+  /* 选中标签的「下边框」涂成面板底色，视觉上就开口连到面板里 */
+  border-bottom-color: var(--bg-3);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.bm-tab .bm-n {
+  font-size: 11px;
+  color: var(--text-faint);
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  padding: 0 6px;
+  min-width: 18px;
+  text-align: center;
+}
+.bm-tab.on .bm-n {
+  color: var(--text);
+}
+
+.bm-panel {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 0 10px 10px 10px;
+  padding: 13px;
+}
+.bm-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 8px;
+}
+.bm-empty {
+  color: var(--text-faint);
+  font-size: 12.5px;
+  text-align: center;
+  padding: 34px 10px;
+  line-height: 1.9;
+}
+
+/* 频道卡片 */
+.ch-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
   cursor: pointer;
   font-family: inherit;
   color: var(--text);
-  font-size: 12.5px;
-  transition: border-color 0.15s, background 0.15s;
-  max-width: 260px;
+  text-align: left;
+  transition: border-color 0.14s, background 0.14s;
+  min-width: 0;
 }
-.rc-item:hover {
+.ch-card:hover {
   border-color: var(--accent);
-  background: var(--bg-3);
+  background: var(--bg);
 }
-.rc-avatar {
-  width: 28px;
-  height: 28px;
+.ch-card img {
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   object-fit: cover;
   background: var(--bg-3);
   flex-shrink: 0;
 }
-.rc-name {
+.ch-card .n {
+  flex: 1;
+  min-width: 0;
+}
+.ch-card .n b {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.rc-count {
-  background: var(--accent);
-  color: #fff;
-  border-radius: 9px;
-  padding: 1px 7px;
+.ch-card .n span {
   font-size: 11px;
-  font-weight: 700;
+  color: var(--text-faint);
+}
+.ch-card .tag {
+  font-size: 10.5px;
+  color: var(--info);
+  background: rgba(96, 165, 250, 0.12);
+  border-radius: 6px;
+  padding: 1px 6px;
   flex-shrink: 0;
+}
+.ch-card .dl {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+  border-radius: 8px;
+  padding: 1px 7px;
+  flex-shrink: 0;
+}
+/* 本次运行内抓取过的：加个角标区分 */
+.ch-card .now {
+  font-size: 10.5px;
+  color: #6ee7a8;
+  border: 1px solid rgba(110, 231, 168, 0.35);
+  border-radius: 6px;
+  padding: 0 5px;
+  flex-shrink: 0;
+}
+
+/* ================= 贾维斯球（抓取中） ================= */
+.content-pane {
+  position: relative;
+}
+.jarvis {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  background: rgba(9, 11, 15, 0.86);
+  backdrop-filter: blur(3px);
+  perspective: 760px;
+}
+.jv-orb {
+  position: relative;
+  width: 138px;
+  height: 138px;
+  transform-style: preserve-3d;
+  animation: jv-tilt 7s ease-in-out infinite;
+}
+.jv-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  animation: jv-spin 1.8s linear infinite;
+}
+/* rotate 独立属性做倾斜，transform 交给动画转 —— 两者会叠加。
+   这样三个环就能绕不同轴转，形成陀螺仪（而不是三个平面的同心圆）。 */
+.jv-r1 {
+  border-top-color: #4fd1ff;
+  border-bottom-color: rgba(79, 209, 255, 0.45);
+}
+.jv-r2 {
+  rotate: x 72deg;
+  border-left-color: #ffd166;
+  border-right-color: rgba(255, 209, 102, 0.4);
+  animation-duration: 2.6s;
+  animation-direction: reverse;
+}
+.jv-r3 {
+  rotate: y 72deg;
+  border-top-color: #8fb4ff;
+  animation-duration: 1.25s;
+}
+.jv-glow {
+  position: absolute;
+  inset: -20px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(79, 209, 255, 0.22), transparent 66%);
+  animation: jv-pulse 2.4s ease-in-out infinite;
+}
+.jv-core {
+  position: absolute;
+  inset: 45px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 28%, #f2fbff, #4fd1ff 44%, #1b6fa8 74%, #0c2637);
+  box-shadow: 0 0 24px rgba(79, 209, 255, 0.8), 0 0 62px rgba(79, 209, 255, 0.34);
+  animation: jv-pulse 1.7s ease-in-out infinite;
+}
+.jv-title {
+  margin-top: 8px;
+  font-size: 14px;
+  letter-spacing: 3px;
+  color: #cfe9ff;
+}
+.jv-text {
+  font-size: 12.5px;
+  color: var(--text-dim);
+  min-height: 18px;
+  text-align: center;
+  padding: 0 30px;
+}
+
+@keyframes jv-spin {
+  to {
+    transform: rotateZ(360deg);
+  }
+}
+@keyframes jv-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.92;
+  }
+  50% {
+    transform: scale(1.07);
+    opacity: 1;
+  }
+}
+@keyframes jv-tilt {
+  0%,
+  100% {
+    transform: rotateX(12deg) rotateZ(0deg);
+  }
+  50% {
+    transform: rotateX(24deg) rotateZ(14deg);
+  }
 }
 
 /* ================= 频道头 ================= */

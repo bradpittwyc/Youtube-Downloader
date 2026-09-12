@@ -470,37 +470,113 @@ function clearChannelView() {
   $('list').innerHTML = '';
   $('btnRefresh').classList.add('hidden');
   $('chCacheInfo').textContent = '';
-  loadSessionChannels();
+  loadLibrary();
 }
 
 /* ==================== 本次已抓取（会话缓存，用于快速切换） ==================== */
 
-async function loadSessionChannels() {
+/* ==================== 主页书签库 ==================== */
+
+/**
+ * 主页下半部分的数据：分类清单 + 频道库。
+ * 频道库 = 持久化的「下过的博主」 ∪ 本次运行抓取过的，按 URL 去重。
+ * 分类是识别频道时按视频标题算出来的（见 src/main/categories.js）。
+ */
+const bmLib = { cats: [], channels: [], active: 'all' };
+
+async function loadLibrary() {
   try {
-    const r = await api.channel.sessionList();
-    const list = (r && r.list) || [];
-    const box = $('sessionChannels');
-    const wrap = $('scList');
-    if (!list.length) {
-      box.classList.add('hidden');
-      return;
+    const [catRes, topRes, sesRes] = await Promise.all([
+      api.channels.categories(),
+      api.channels.top(300),
+      api.channel.sessionList(),
+    ]);
+    bmLib.cats = (catRes && catRes.list) || [];
+
+    const byUrl = new Map();
+    for (const c of (topRes && topRes.list) || []) {
+      const key = String(c.url || '').toLowerCase();
+      if (!key) continue;
+      byUrl.set(key, {
+        url: c.url,
+        title: c.title || c.url,
+        avatar: c.avatar || '',
+        cat: c.cat || '',
+        catName: c.catName || '',
+        downloads: c.downloads || 0,
+        session: false,
+      });
     }
-    box.classList.remove('hidden');
-    wrap.innerHTML = list
-      .map((c) => {
-        const kind = c.targetKind === 'playlist' ? '播放列表' : c.targetKind === 'video' ? '单个视频' : '频道';
-        return `<button class="rc-item" data-sc-url="${esc(c.url)}" title="${esc(
-          `${c.title}\n${kind} · ${c.items} 个内容\n点击直接切回（不会重新抓取）`
-        )}">
-          <img class="rc-avatar" loading="lazy" src="${esc(c.avatar || '')}" />
-          <span class="rc-name">${esc(c.title)}</span>
-          <span class="rc-count" style="background:#3a4a6b">${c.items}</span>
-        </button>`;
-      })
-      .join('');
+    for (const c of (sesRes && sesRes.list) || []) {
+      const key = String(c.url || '').toLowerCase();
+      if (!key) continue;
+      const prev = byUrl.get(key) || {};
+      byUrl.set(key, {
+        url: c.url,
+        title: c.title || prev.title || c.url,
+        avatar: c.avatar || prev.avatar || '',
+        cat: c.cat || prev.cat || '',
+        catName: c.catName || prev.catName || '',
+        downloads: prev.downloads || 0,
+        session: true,
+      });
+    }
+    bmLib.channels = Array.from(byUrl.values());
+    renderLibrary();
+    return bmLib;
   } catch (err) {
-    console.error('loadSessionChannels failed:', err && err.message);
+    console.error('loadLibrary failed:', err && err.message);
+    return bmLib;
   }
+}
+
+function renderLibrary() {
+  const tabs = $('bmTabs');
+  const panel = $('bmPanel');
+  if (!tabs || !panel) return;
+
+  const all = bmLib.channels;
+  const catOf = (c) => c.cat || 'other';
+  const countOf = (id) => (id === 'all' ? all.length : all.filter((c) => catOf(c) === id).length);
+
+  // 分类标签（「全部」在最前）。书签用短名，否则 8 个标签会换行、破坏书签的连贯观感；
+  // 完整分类名显示在卡片副标题上。
+  const list = [{ id: 'all', name: '全部', short: '全部', icon: '📚' }].concat(bmLib.cats);
+  tabs.innerHTML = list
+    .map(
+      (c) => `<button class="bm-tab${bmLib.active === c.id ? ' on' : ''}" data-bm="${esc(c.id)}" title="${esc(
+        c.name
+      )}">
+        <span>${c.icon || ''}</span>${esc(c.short || c.name)}<span class="bm-n">${countOf(c.id)}</span>
+      </button>`
+    )
+    .join('');
+
+  const show = bmLib.active === 'all' ? all : all.filter((c) => catOf(c) === bmLib.active);
+  if (!show.length) {
+    panel.innerHTML = `<div class="bm-empty">${
+      all.length
+        ? '这个分类下还没有博主。<br><span class="muted">识别过的频道会按视频内容自动归类</span>'
+        : '还没有博主。<br><span class="muted">在上面粘贴一个频道链接，识别后它就会出现在这里</span>'
+    }</div>`;
+    return;
+  }
+  show.sort((a, b) => (b.downloads || 0) - (a.downloads || 0));
+  panel.innerHTML = `<div class="bm-grid">${show.map(bmCardHtml).join('')}</div>`;
+}
+
+function bmCardHtml(c) {
+  const cat = bmLib.cats.find((x) => x.id === c.cat);
+  const catName = cat ? cat.name : c.catName || (c.cat ? c.cat : '未分类');
+  const sub = `${catName}${c.downloads ? ' · 下载 ' + c.downloads : ''}`;
+  return `<button class="ch-card" data-bm-url="${esc(c.url)}" title="${esc(
+    `${c.title}\n${sub}\n点击抓取最新内容`
+  )}">
+    <img loading="lazy" src="${esc(c.avatar || '')}" />
+    <span class="n"><b>${esc(c.title)}</b><span>${esc(sub)}</span></span>
+    ${c.session ? '<span class="now">本次</span>' : ''}
+    ${c.downloads ? `<span class="dl">${c.downloads}</span>` : ''}
+  </button>`;
 }
 
 function renderChannel(data) {
@@ -892,33 +968,6 @@ function startRetryTicker() {
 
 /* ==================== 最近下载的博主 ==================== */
 
-async function loadRecentChannels() {
-  try {
-    const r = await api.channels.top(12);
-    const list = (r && r.list) || [];
-    const box = $('recentChannels');
-    const wrap = $('rcList');
-    if (!list.length) {
-      box.classList.add('hidden');
-      return;
-    }
-    box.classList.remove('hidden');
-    wrap.innerHTML = list
-      .map(
-        (c) => `<button class="rc-item" data-rc-url="${esc(c.url)}" title="${esc(
-          `${c.title || c.url}\n累计下载 ${c.downloads || 0} 个\n点击填入链接`
-        )}">
-          <img class="rc-avatar" loading="lazy" src="${esc(c.avatar || '')}" />
-          <span class="rc-name">${esc(c.title || c.url)}</span>
-          <span class="rc-count">${c.downloads || 0}</span>
-        </button>`
-      )
-      .join('');
-  } catch (err) {
-    console.error('loadRecentChannels failed:', err && err.message);
-  }
-}
-
 /* ==================== 识别 ==================== */
 
 async function doFetch(force) {
@@ -965,23 +1014,31 @@ function setFetchingUI(on) {
   $('btnFetch').disabled = on;
   $('btnFetch').innerHTML = on ? '<span class="spinner"></span> 识别中' : '识别';
   $('btnCancelFetch').classList.toggle('hidden', !on);
+  // 贾维斯球：抓取期间浮在内容区上旋转，读完即隐
+  $('jarvis').classList.toggle('hidden', !on);
+  if (on) $('jvText').textContent = '正在连接…';
   if (!on) $('fetchStatus').classList.add('hidden');
 }
 
 function onProgress(p) {
   const el = $('fetchStatus');
   el.classList.remove('hidden');
+  let text = '';
   if (p.phase === 'tab') {
-    el.innerHTML = `<span class="spinner"></span> 正在抓取 ${esc(SECTION_LABEL[p.tab] || p.tab)} 标签页（${p.index + 1}/${p.total}）…`;
+    text = `正在抓取 ${SECTION_LABEL[p.tab] || p.tab} 标签页（${p.index + 1}/${p.total}）…`;
   } else if (p.phase === 'expand-playlist') {
-    el.innerHTML = `<span class="spinner"></span> 正在展开${esc(SECTION_LABEL[p.tab] || '')}容器「${esc(
-      p.label || ''
-    )}」（${(p.index || 0) + 1}/${p.total || '?'}）…`;
+    text = `正在展开${SECTION_LABEL[p.tab] || ''}容器「${p.label || ''}」（${(p.index || 0) + 1}/${
+      p.total || '?'
+    }）…`;
   } else if (p.phase === 'probe') {
-    el.innerHTML = `<span class="spinner"></span> ${esc(p.label || '读取中…')}`;
+    text = p.label || '读取中…';
   } else if (p.phase === 'cache') {
-    el.innerHTML = `⚡ ${esc(p.label || '')}`;
+    text = p.label || '使用缓存';
   }
+  el.innerHTML = `<span class="spinner"></span> ${esc(text)}`;
+  // 贾维斯球下方也显示同一句进度，球在转的同时告诉用户进行到哪一步了
+  const jv = $('jvText');
+  if (jv) jv.textContent = text;
 }
 
 /* ==================== 设置 ==================== */
@@ -1099,49 +1156,43 @@ function bind() {
     $('urlInput').value = '';
   });
 
-  // 本次已抓取：点击直接切回（命中会话缓存，不会再抓）
-  $('scList').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-sc-url]');
+  // 书签标签：切换分类
+  $('bmTabs').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-bm]');
+    if (!btn) return;
+    bmLib.active = btn.getAttribute('data-bm');
+    renderLibrary();
+  });
+
+  // 频道卡片：点击 = 填入链接并【直接开始识别】，不用再点一次
+  $('bmPanel').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-bm-url]');
     if (!btn) return;
     if (state.fetching) {
       toast('正在识别中，请稍候…', 'warn');
       return;
     }
-    const url = btn.getAttribute('data-sc-url');
-    $('urlInput').value = url;
+    $('urlInput').value = btn.getAttribute('data-bm-url');
     doFetch(false);
   });
 
-  // 最近下载的博主：点击 = 填入链接并【直接开始识别】，不用再点一次
-  $('rcList').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-rc-url]');
-    if (!btn) return;
-    if (state.fetching) {
-      toast('正在识别中，请稍候…', 'warn');
-      return;
-    }
-    const url = btn.getAttribute('data-rc-url');
-    $('urlInput').value = url;
-    doFetch(false);
-  });
-  // 右键从列表移除
-  $('rcList').addEventListener('contextmenu', async (e) => {
-    const btn = e.target.closest('[data-rc-url]');
+  // 右键从库里移除（只是不再显示，不影响已下载的文件和队列）
+  $('bmPanel').addEventListener('contextmenu', async (e) => {
+    const btn = e.target.closest('[data-bm-url]');
     if (!btn) return;
     e.preventDefault();
-    const url = btn.getAttribute('data-rc-url');
-    const name = btn.querySelector('.rc-name')?.textContent || url;
+    const url = btn.getAttribute('data-bm-url');
+    const name = btn.querySelector('.n b')?.textContent || url;
     const ok = await api.dialog.confirm({
       title: '移除记录',
-      message: `把「${name}」从最近下载列表里移除？`,
+      message: `把「${name}」从库里移除？`,
       detail: '只是不再显示在这里，已下载的文件和队列记录都不受影响。',
       confirmLabel: '移除',
       type: 'question',
     });
     if (!ok) return;
-    const r = await api.channels.remove(url);
-    state.recentChannels = (r && r.list) || [];
-    loadRecentChannels();
+    await api.channels.remove(url);
+    await loadLibrary();
   });
   $('urlInput').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') doFetch(false);
@@ -1537,7 +1588,7 @@ function bind() {
     const doneCount = state.queue.filter((q) => q.status === 'done' || q.status === 'skipped').length;
     if (doneCount !== lastDoneCount) {
       lastDoneCount = doneCount;
-      loadRecentChannels();
+      loadLibrary();
       // 重新扫一遍边车索引，让「已下载」标记与列表过滤立即反映最新状态
       loadDownloadsIndex(true).then(() => renderList(true));
     }
@@ -1595,7 +1646,7 @@ async function enqueue(items) {
   state.stats = q.stats || {};
   lastDoneCount = state.queue.filter((x) => x.status === 'done' || x.status === 'skipped').length;
   renderQueue();
-  await loadRecentChannels();
+  await loadLibrary();
   loadFontList();
   await loadDownloadsIndex();
   startRetryTicker();

@@ -16,6 +16,7 @@ const study = require('./study');
 const studyLlm = require('./study/llm');
 const secret = require('./study/secret');
 const channelsStore = require('./channels-store');
+const categories = require('./categories');
 const downloadsIndex = require('./downloads-index');
 const { authArgs, detectBrowsers, authSummary, explainCookieError } = require('./ytdlp-auth');
 const quoteCard = require('./study/quote-card');
@@ -526,6 +527,22 @@ function registerIpc() {
       if (!out.ok) return { ok: false, error: out.error || '识别失败' };
 
       const data = Object.assign({}, out.result, { targetKind: target.kind });
+      // 顺便按视频标题给这个频道分类（书签分组用）。
+      // 分类只需要粗粒度，关键词打分就够，**不花钱也不联网**；
+      // 而且此刻手上正好有几百条标题，是最准的时机。
+      try {
+        if (target.kind === 'channel' && (data.items || []).length) {
+          const cls = categories.classifyTitles((data.items || []).map((x) => x.title));
+          data.category = { id: cls.id, name: cls.name, icon: cls.icon };
+          channelsStore.setCategory(
+            { url: target.channelBase || target.url, title: (data.channel && data.channel.title) || '', avatar: (data.channel && data.channel.avatar) || '' },
+            cls.id,
+            cls.name
+          );
+        }
+      } catch (err) {
+        console.error('[main] 频道分类失败:', err && err.message);
+      }
       if (skey) sessionCache.set(skey, { ts: Date.now(), data });
       try {
         fs.writeFileSync(cacheFile, JSON.stringify({ ts: Date.now(), data }), 'utf8');
@@ -551,17 +568,30 @@ function registerIpc() {
     }
   });
 
+  // ---- 频道分类（书签分组）----
+  /** 书签栏要显示的分类清单 */
+  ipcMain.handle('categories:list', () => {
+    try {
+      return { ok: true, list: categories.allCategories() };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err), list: [] };
+    }
+  });
+
   /** 本次运行内已抓取过的列表（用于主页的快速切换） */
   ipcMain.handle('channel:session-list', () => {
     const list = [];
     for (const [url, v] of sessionCache.entries()) {
       const ch = (v.data && v.data.channel) || {};
+      const cat = (v.data && v.data.category) || null;
       list.push({
         url,
         title: ch.title || url,
         avatar: ch.avatar || '',
         handle: ch.handle || '',
         targetKind: (v.data && v.data.targetKind) || 'channel',
+        cat: cat ? cat.id : '',
+        catName: cat ? cat.name : '',
         items: ((v.data && v.data.items) || []).length,
         ts: v.ts,
       });
@@ -783,6 +813,41 @@ function registerIpc() {
 }
 
 /**
+ * 回填频道分类（书签分组用）。
+ *
+ * 分类需要视频标题，而只有识别时才拿得到；老记录（分类功能上线前建的书签）没有。
+ * 好在频道缓存的 30 分钟列表里就存着标题，直接拿来补，不用重新联网识别。
+ * 每次启动都跑：只处理「还没分类」的，成本是读几个 JSON。
+ */
+function backfillCategories() {
+  try {
+    const list = channelsStore.load();
+    const pending = list.filter((x) => x && x.url && !x.cat);
+    if (!pending.length) return;
+    let n = 0;
+    for (const item of pending) {
+      const f = channelCacheFile(item.url);
+      if (!fs.existsSync(f)) continue;
+      try {
+        const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+        const items = (j && j.data && j.data.items) || [];
+        if (!items.length) continue;
+        const cls = categories.classifyTitles(items.map((x) => x.title));
+        channelsStore.setCategory(
+          { url: item.url, title: item.title, avatar: item.avatar },
+          cls.id,
+          cls.name
+        );
+        n++;
+      } catch (_) {}
+    }
+    if (n) console.log(`[channels] 已按视频标题回填 ${n} 个频道的分类`);
+  } catch (err) {
+    console.error('[channels] 分类回填失败:', err && err.message);
+  }
+}
+
+/**
  * 一次性回填「最近下载的博主」。
  * 新版本会在下载成功时直接记录博主信息，但老版本下载的任务只有频道【名字】没有 URL，
  * 因此这里借频道缓存（里面存着每个频道的完整识别结果，含 title 和 url）建立 名字→URL 映射，
@@ -928,6 +993,7 @@ app.whenReady().then(() => {
   registerIpc();
   createWindow();
   backfillChannelHistory();
+  backfillCategories();
   // 启动后自动继续上次未完成的任务（断点续传）
   setTimeout(() => queue.pump(), 1500);
 });

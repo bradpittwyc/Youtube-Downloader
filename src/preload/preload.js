@@ -62,6 +62,7 @@ contextBridge.exposeInMainWorld('api', {
   channels: {
     top: (limit) => ipcRenderer.invoke('channels:top', limit),
     remove: (url) => ipcRenderer.invoke('channels:remove', url),
+    categories: () => ipcRenderer.invoke('categories:list'),
   },
 
   queue: {

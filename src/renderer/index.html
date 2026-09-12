@@ -43,33 +43,37 @@
       <section class="pane content-pane">
         <div id="fetchStatus" class="fetch-status hidden"></div>
 
-        <div id="emptyState" class="empty-state">
-          <img class="empty-icon" src="youtube-logo.png" alt="" />
-          <h2>粘贴博主主页链接开始</h2>
-          <p>自动识别该频道的 <b>Videos / Shorts / Live 直播 / Podcasts</b> 全部内容，勾选后批量下载。</p>
-          <div class="hint-grid">
-            <div><code>@MrBeast</code><span>直接输入频道名</span></div>
-            <div><code>youtube.com/@MrBeast</code><span>频道主页</span></div>
-            <div><code>youtube.com/@x/videos</code><span>指定标签页</span></div>
-            <div><code>watch?v=...</code><span>单个视频</span></div>
+        <!-- 抓取中的「贾维斯球」：旋转到内容读完为止 -->
+        <div id="jarvis" class="jarvis hidden">
+          <div class="jv-orb">
+            <span class="jv-ring jv-r1"></span>
+            <span class="jv-ring jv-r2"></span>
+            <span class="jv-ring jv-r3"></span>
+            <span class="jv-glow"></span>
+            <span class="jv-core"></span>
+          </div>
+          <div class="jv-title">正在识别频道</div>
+          <div id="jvText" class="jv-text">正在连接…</div>
+        </div>
+
+        <div id="emptyState" class="home">
+          <!-- ===== 上半：粘贴区（靠上，不居中） ===== -->
+          <div class="home-hero">
+            <img class="empty-icon" src="youtube-logo.png" alt="" />
+            <h2>粘贴博主主页链接开始</h2>
+            <p>自动识别该频道的 <b>Videos / Shorts / Live 直播 / Podcasts</b> 全部内容，勾选后批量下载。</p>
+            <div class="hint-grid">
+              <div><code>@MrBeast</code><span>直接输入频道名</span></div>
+              <div><code>youtube.com/@MrBeast</code><span>频道主页</span></div>
+              <div><code>youtube.com/@x/videos</code><span>指定标签页</span></div>
+              <div><code>watch?v=...</code><span>单个视频</span></div>
+            </div>
           </div>
 
-          <!-- 本次运行内抓取过的博主 / 播放列表：点击直接切回，不会重新抓取 -->
-          <div id="sessionChannels" class="recent-channels hidden">
-            <div class="rc-head">
-              <span>本次已抓取</span>
-              <span class="muted">点一下直接切回，不会重新抓取 · 关闭程序后清空</span>
-            </div>
-            <div id="scList" class="rc-list"></div>
-          </div>
-
-          <!-- 最近下载的博主：按下载数倒序，点一下直接抓取最新内容 -->
-          <div id="recentChannels" class="recent-channels hidden">
-            <div class="rc-head">
-              <span>最近下载的博主</span>
-              <span class="muted">按下过的数量排序 · 点击头像直接抓取最新内容</span>
-            </div>
-            <div id="rcList" class="rc-list"></div>
+          <!-- ===== 下半：书签式分页，按内容倾向归类 ===== -->
+          <div class="home-library">
+            <div class="bm-tabs" id="bmTabs"></div>
+            <div class="bm-panel" id="bmPanel"></div>
           </div>
         </div>
 
