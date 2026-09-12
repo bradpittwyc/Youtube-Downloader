@@ -18,6 +18,7 @@ const secret = require('./study/secret');
 const channelsStore = require('./channels-store');
 const downloadsIndex = require('./downloads-index');
 const { authArgs, detectBrowsers, authSummary, explainCookieError } = require('./ytdlp-auth');
+const quoteCard = require('./study/quote-card');
 const queueMod = require('./queue');
 const { DownloadQueue } = queueMod;
 
@@ -293,6 +294,41 @@ function registerIpc() {
       return { ok: true, estimate: study.estimateFor(srtPath, s, durationMs || 0) };
     } catch (err) {
       return { ok: false, error: String((err && err.message) || err).slice(0, 200) };
+    }
+  });
+
+  /**
+   * 把学习文档里的「金句」渲染成图片（存手机 / 分享用）。
+   * 金句已经在学习缓存里，不需要重新调用大模型，也不产生 API 费用。
+   */
+  ipcMain.handle('study:quote-cards', async (_e, { key }) => {
+    const item = queue.items.get(key);
+    if (!item) return { ok: false, error: '任务不存在' };
+    const settings = settingsStore.load();
+    const srt = (item.subPaths || []).find((p) => /\.srt$/i.test(p)) || '';
+    const quotes = study.readQuotesFor(item.id, srt, settings.studyModel);
+    if (!quotes.length) {
+      return { ok: false, error: '没有找到金句。请先「生成文档」（金句来自学习文档的分析结果）' };
+    }
+    // 输出到视频旁边的子文件夹，避免和视频/字幕混在一起
+    const base = item.filePath
+      ? String(item.filePath).replace(/\.[^.\\/]+$/, '')
+      : path.join(settings.outputDir, queueMod.sanitizeFolderName(item.title || item.id));
+    const outDir = `${base}.金句卡片`;
+    try {
+      const r = await quoteCard.renderQuoteCards({
+        quotes,
+        meta: { title: item.title, channel: item.channel, url: item.url },
+        outDir,
+        accent: settings.assColorZh || '#FFD166',
+      });
+      if (r.ok) {
+        item.stage = `已完成 · 生成了 ${r.files.length} 张金句卡片`;
+        queue.changed(true);
+      }
+      return r;
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err).slice(0, 300) };
     }
   });
 

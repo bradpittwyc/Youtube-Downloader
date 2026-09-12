@@ -339,6 +339,16 @@ function clearCache(videoId, srtPath) {
   } catch (_) {}
 }
 
+/**
+ * 取出某个视频已生成的金句（做金句卡片用）。
+ * 金句只存在学习缓存里，不需要重新调用大模型。
+ * allowStale：即使提示词版本升级过，旧缓存里的金句照样能用。
+ */
+function readQuotesFor(videoId, srtPath, model) {
+  const j = readCache(videoId, srtPath, model, { allowStale: true });
+  return (j && Array.isArray(j.quotes) ? j.quotes : []).filter((q) => q && (q.en || q.zh));
+}
+
 module.exports = {
   generateForVideo,
   estimateFor,
@@ -348,4 +358,5 @@ module.exports = {
   clearCache,
   writeFileSafe,
   probeVideoSize,
+  readQuotesFor,
 };

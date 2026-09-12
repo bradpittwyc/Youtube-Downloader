@@ -80,6 +80,7 @@ contextBridge.exposeInMainWorld('api', {
     estimate: (payload) => ipcRenderer.invoke('study:estimate', payload),
     generate: (key, force) => ipcRenderer.invoke('study:generate', { key, force }),
     keyInfo: () => ipcRenderer.invoke('study:key-info'),
+    quoteCards: (key) => ipcRenderer.invoke('study:quote-cards', { key }),
   },
 
   shell: {
