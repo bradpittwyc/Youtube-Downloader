@@ -132,6 +132,7 @@ function downloadSpec(o) {
 /**
  * 读取 yt-dlp 的 --write-info-json 产物（顺手删掉它，只留我们自己的紧凑边车）。
  * 好处是零额外网络请求：元数据下载时本来就抓过了。
+ * 只取边车需要的几个字段；文案那种大块头不存，界面上也不展示。
  */
 function readInfoJson(videoPath) {
   if (!videoPath) return null;
@@ -144,7 +145,6 @@ function readInfoJson(videoPath) {
     } catch (_) {}
     return {
       id: j.id || '',
-      description: j.description || '',
       uploadDate: j.upload_date || '',
       viewCount: typeof j.view_count === 'number' ? j.view_count : null,
       likeCount: typeof j.like_count === 'number' ? j.like_count : null,
@@ -895,7 +895,6 @@ class DownloadQueue extends EventEmitter {
             likeCount: extra && extra.likeCount,
             duration: item.duration || (extra && extra.duration),
             url: item.url,
-            description: extra && extra.description,
           });
           downloadsIndex.invalidate();
         } catch (err) {

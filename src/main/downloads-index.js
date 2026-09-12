@@ -28,9 +28,6 @@ function writeSidecar(videoPath, info) {
   if (!videoPath) return '';
   const p = sidecarOf(videoPath);
   try {
-    // 文案截断后再存：边车是给人看的离线缓存，不是原始元数据仓库。
-    // 不截断的话一条带大量链接的文案能有几十 KB。
-    const desc = String(info.description || '');
     fs.writeFileSync(
       p,
       JSON.stringify(
@@ -44,8 +41,6 @@ function writeSidecar(videoPath, info) {
           duration: info.duration == null ? null : info.duration,
           url: info.url || '',
           file: path.basename(videoPath),
-          description: desc.slice(0, 4000),
-          descriptionTruncated: desc.length > 4000,
           at: new Date().toISOString(),
         },
         null,

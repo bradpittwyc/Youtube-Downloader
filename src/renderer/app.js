@@ -746,9 +746,7 @@ async function openPreview(id) {
   if (!it) return;
   const seq = ++pvSeq;
   pvData = {};
-  let localDescShown = false;
   $('previewModal').classList.remove('hidden');
-  $('pvDesc').innerHTML = '<span class="spinner"></span> 正在读取完整信息…';
   // 第一步：列表里已有的数据，秒出
   renderPreview({
     id: it.id,
@@ -761,7 +759,7 @@ async function openPreview(id) {
     channel: it.channel || '',
   });
 
-  // 第二步：下载过的读本地边车（发布时间、播放量、**文案**都在里面）
+  // 第二步：下载过的读本地边车（发布时间、播放量、点赞）—— 不用联网
   try {
     const loc = await api.downloads.local(id);
     if (seq !== pvSeq) return;
@@ -773,16 +771,11 @@ async function openPreview(id) {
         viewCount: rec.viewCount != null ? rec.viewCount : pvData.viewCount,
         likeCount: rec.likeCount,
       });
-      // 边车里有文案就直接用，省掉一次联网；没有才等下面的网络请求
-      if (rec.description) {
-        $('pvDesc').textContent =
-          String(rec.description).trim() + (rec.descriptionTruncated ? '\n\n…（文案过长，此处已截断）' : '');
-        localDescShown = true;
-      }
     }
   } catch (_) {}
 
-  // 第三步：联网拉完整详情（含最新文案与播放量）
+  // 第三步：联网补发布时间/播放量/点赞
+  // （列表用的 flat 数据没有发布时间，只能按需再拉一次）
   const res = await api.downloads.details(it.url);
   if (seq !== pvSeq) return; // 已经切走或关掉了，丢弃这次结果
   if (res && res.ok && res.details) {
@@ -798,24 +791,10 @@ async function openPreview(id) {
       thumbnail: d.thumbnail || pvData.thumbnail,
       webpageUrl: d.webpageUrl || pvData.url,
     });
-    const text = String(d.description || '').trim();
-    if (text) $('pvDesc').textContent = text + (d.descriptionTruncated ? '\n\n…（文案过长，此处已截断）' : '');
-    else if (!localDescShown) $('pvDesc').textContent = '（该视频没有文案）';
-  } else if (!localDescShown) {
-    // 联网失败（常见于 YouTube 风控）——本地边车也没有文案时才报错
-    $('pvDesc').textContent = friendlyDetailError(res && res.error);
+  } else {
+    // 拉不到就保持列表里已有的信息，不打扰用户（常见于 YouTube 风控）
+    console.warn('读取作品详情失败:', (res && res.error) || '未知错误');
   }
-}
-
-/** 把 yt-dlp 的原始报错翻译成人话（尤其风控那条，原文有十几行） */
-function friendlyDetailError(err) {
-  const s = String(err || '');
-  if (/Sign in to confirm|not a bot/i.test(s)) {
-    return 'YouTube 要求验证「你不是机器人」，暂时读不到文案。\n等几分钟再试，或在设置里配置 Cookies 文件。';
-  }
-  if (/\b429\b|Too Many Requests/i.test(s)) return 'YouTube 限流了（429），过几分钟再试。';
-  if (/Video unavailable|Private video|members-only/i.test(s)) return '该视频不可访问（可能是私享或会员专属）。';
-  return '读取完整信息失败：' + s.slice(0, 200);
 }
 
 /* ==================== 最近下载的博主 ==================== */
