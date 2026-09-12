@@ -24,7 +24,7 @@
           id="urlInput"
           type="text"
           spellcheck="false"
-          placeholder="粘贴博主主页链接，例如 https://www.youtube.com/@MrBeast（也可粘贴单个视频或播放列表链接）"
+          placeholder="粘贴频道主页链接，例如 https://www.youtube.com/@MrBeast（也可粘贴单个视频或播放列表链接）"
         />
         <button id="btnFetch" class="btn primary">识别</button>
         <button id="btnCancelFetch" class="btn danger hidden">取消</button>
@@ -64,7 +64,7 @@
           <!-- ===== 上半：粘贴区（靠上，不居中） ===== -->
           <div class="home-hero">
             <img class="empty-icon" src="youtube-logo.png" alt="" />
-            <h2>粘贴博主主页链接开始</h2>
+            <h2>粘贴频道主页链接开始</h2>
             <p>自动识别该频道的 <b>Videos / Shorts / Live 直播 / Podcasts</b> 全部内容，勾选后批量下载。</p>
             <div class="hint-grid">
               <div><code>@MrBeast</code><span>直接输入频道名</span></div>
@@ -95,7 +95,7 @@
             <button
               id="btnBackHome"
               class="btn ghost"
-              title="返回主页。本次抓取过的博主都会留在主页上，可以直接切回来（不会再重新抓取）"
+              title="返回主页。本次抓取过的频道都会留在主页上，可以直接切回来（不会再重新抓取）"
             >
               ← 返回
             </button>
@@ -307,14 +307,14 @@
               ></label
             >
             <div class="inline" style="margin-top: 8px; align-items: center; gap: 8px">
-              <span class="muted">博主母文件夹命名</span>
+              <span class="muted">频道母文件夹命名</span>
               <select id="setChannelFolderName" class="select-sm">
                 <option value="handle">@频道名（如 @lexfridman）</option>
                 <option value="id">频道 ID（如 UCSHZKyawb77ixDdsGog4iWA）</option>
                 <option value="title">频道显示名（如 Lex Fridman）</option>
               </select>
               <small class="muted"
-                >以博主主页抓取的内容会先在下载目录下建这层母文件夹，视频文件夹放在它里面；已存在则直接复用</small
+                >以频道主页抓取的内容会先在下载目录下建这层母文件夹，视频文件夹放在它里面；已存在则直接复用</small
               >
             </div>
           </div>

@@ -567,8 +567,8 @@ function renderLibrary() {
   if (!show.length) {
     panel.innerHTML = `<div class="bm-empty">${
       all.length
-        ? '这个分类下还没有博主。<br><span class="muted">识别过的频道会按视频内容自动归类</span>'
-        : '还没有博主。<br><span class="muted">在上面粘贴一个频道链接，识别后它就会出现在这里</span>'
+        ? '这个分类下还没有频道。<br><span class="muted">识别过的频道会按视频内容自动归类</span>'
+        : '还没有频道。<br><span class="muted">在上面粘贴一个频道链接，识别后它就会出现在这里</span>'
     }</div>`;
     return;
   }
@@ -1106,7 +1106,7 @@ async function runNetDiag() {
 async function doFetch(force) {
   const input = $('urlInput').value.trim();
   if (!input) {
-    toast('请先粘贴博主主页链接', 'warn');
+    toast('请先粘贴频道主页链接', 'warn');
     return;
   }
   if (state.fetching) return;
