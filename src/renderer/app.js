@@ -99,6 +99,19 @@ let doneSig = '';
 /** 已完成任务数，用来判断博主下载数是否变化 */
 let lastDoneCount = -1;
 
+/**
+ * 某个作品在【本地磁盘上】的文件路径。列表里的「打开」用它定位文件夹。
+ * 两个来源，优先队列（最新、最准），回退磁盘边车索引
+ * （队列被「清除已完成」清掉之后，仍然能靠边车找到文件）。
+ * 找不到返回空串——说明只是"标记为已下载"但文件已不在。
+ */
+function localPathOf(id) {
+  const q = state.queue.find((x) => x.id === id && x.filePath && x.fileExists !== false);
+  if (q) return q.filePath;
+  const rec = state.downloadedIndex.get(id);
+  return (rec && rec.videoPath) || '';
+}
+
 const $ = (id) => document.getElementById(id);
 
 /* ==================== 工具函数 ==================== */
@@ -276,7 +289,8 @@ function rowHtml(it, nested) {
   if (it.viewCount != null) meta.push(`<span>👁 ${fmtCount(it.viewCount)}</span>`);
   if (it.playlistTitle) meta.push(`<span>📚 ${esc(it.playlistTitle)}</span>`);
   // 「已下载」标记以 doneKeys() 为准（队列 + 磁盘边车索引），不再只看队列状态
-  if (doneKeys().has(it.id)) meta.push('<span class="badge done">已下载</span>');
+  const isDone = doneKeys().has(it.id);
+  if (isDone) meta.push('<span class="badge done">已下载</span>');
 
   return `<div class="row ${selected ? 'selected' : ''} ${nested ? 'nested' : ''}" data-id="${esc(it.id)}">
     <input type="checkbox" ${selected ? 'checked' : ''} data-check="${esc(it.id)}" />
@@ -288,6 +302,11 @@ function rowHtml(it, nested) {
       <div class="row-meta">${meta.join('')}</div>
     </div>
     <div class="row-actions">
+      ${
+        isDone
+          ? `<button class="btn tiny" data-open="${esc(it.id)}" title="打开这个视频所在的文件夹（含视频/音频/字幕/文档）">打开</button>`
+          : ''
+      }
       <button class="btn tiny" data-dl="${esc(it.id)}" title="只下载这一个">下载</button>
     </div>
   </div>`;
@@ -1412,6 +1431,15 @@ function bind() {
       const id = dl.getAttribute('data-dl');
       const it = itemById(id);
       if (it) enqueue([it]);
+      return;
+    }
+    // 已下载作品的「打开」：定位到它在磁盘上的位置并打开所在文件夹
+    const openBtn = e.target.closest('[data-open]');
+    if (openBtn) {
+      const id = openBtn.getAttribute('data-open');
+      const p = localPathOf(id);
+      if (p) api.shell.openPath(p);
+      else toast('找不到这个视频的本地文件（可能已被移动或删除）', 'warn', 5000);
       return;
     }
     if (e.target.matches('input[type=checkbox]')) {
