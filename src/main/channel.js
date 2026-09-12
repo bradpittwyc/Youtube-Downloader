@@ -231,7 +231,12 @@ async function enumerateChannel(bin, channelBase, opts = {}) {
     if (onProgress) onProgress({ phase: 'tab', tab: sec, index: i, total: tabs.length });
 
     const tabUrl = `${channelBase}/${tab}`;
-    const res = await dumpFlat(bin, tabUrl, { onChild: opts.onChild, auth: opts.auth });
+    // 把上限真正传给 yt-dlp，让它翻够就停（而不是拉回全部再过滤）
+    const res = await dumpFlat(bin, tabUrl, {
+      onChild: opts.onChild,
+      auth: opts.auth,
+      playlistEnd: opts.playlistEnd,
+    });
 
     if (!res.ok) {
       if (res.missing) {
@@ -295,7 +300,18 @@ async function enumerateChannel(bin, channelBase, opts = {}) {
 
     const containers = entries.filter((e) => isContainer(e) && e.url);
     if (containers.length) {
-      await expandContainers(bin, containers, sec, {
+      // 容器数量上限：每个容器是一次独立的 yt-dlp 调用，不设限的话
+      // Huberman 那种 428 个容器会变成几百次请求，比标签页本身慢得多。
+      const maxContainers = Number(opts.maxContainers) || 0;
+      const use = maxContainers > 0 ? containers.slice(0, maxContainers) : containers;
+      if (use.length < containers.length) {
+        result.warnings.push({
+          tab: sec,
+          level: 'info',
+          message: `${TAB_LABEL[sec] || sec} 共 ${containers.length} 个，只展开了前 ${use.length} 个`,
+        });
+      }
+      await expandContainers(bin, use, sec, {
         result,
         byId,
         maxItems,
@@ -323,9 +339,16 @@ async function expandContainers(bin, containers, sec, ctx) {
   const label = TAB_LABEL[sec] || sec;
   let done = 0;
   let cursor = 0;
+  let stopped = false;
 
   async function worker() {
     while (true) {
+      // 已经攒够上限就别再展开了 —— 后面的容器展开出来也会被 pushItem 丢掉，
+      // 白白多发几十上百次请求（而且每次都可能被 YouTube 风控）。
+      if (maxItems > 0 && byId.size >= maxItems) {
+        stopped = true;
+        return;
+      }
       const idx = cursor++;
       if (idx >= containers.length) return;
       const c = containers[idx];
@@ -354,10 +377,22 @@ async function expandContainers(bin, containers, sec, ctx) {
   }
 
   await Promise.all(Array.from({ length: Math.min(concurrency, containers.length) }, worker));
+  if (stopped) {
+    result.warnings.push({
+      tab: sec,
+      level: 'info',
+      message: `${label}：已攒够上限，剩余容器未展开`,
+    });
+  }
 }
 
 function pushItem(result, byId, item, maxItems) {
-  if (maxItems > 0 && byId.size >= maxItems && !byId.has(item.id)) return;
+  if (maxItems > 0 && byId.size >= maxItems && !byId.has(item.id)) {
+    // 记下「被上限截断了」——界面要据此告诉用户"这不是全部"，
+    // 否则用户会以为频道只有 300 个内容。
+    result.truncated = true;
+    return;
+  }
   const existing = byId.get(item.id);
   if (existing) {
     // 同一视频出现在多个标签页（例如既在 Videos 里、又属于某个播放列表）——

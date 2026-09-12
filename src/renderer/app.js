@@ -618,7 +618,13 @@ function renderChannel(data) {
     .filter(([, v]) => v && v.length)
     .map(([k, v]) => `${SECTION_LABEL[k] || k} ${v.length}`)
     .join(' · ');
-  $('chTotal').textContent = `共 ${allItems().length} 个内容${counts ? '（' + counts + '）' : ''}`;
+  // 被「每个标签页最多识别 N 个」截断时要说清楚，否则用户会以为频道只有这么多。
+  const cut = state.data && state.data.truncated ? '，已达识别上限' : '';
+  $('chTotal').textContent = `共 ${allItems().length} 个内容${counts ? '（' + counts + '）' : ''}${cut}`;
+  if (state.data && state.data.truncated) {
+    $('chTotal').title =
+      '列表已被「每个标签页最多识别」上限截断，只显示最近抓到的这部分。\n需要更多就去设置里调大上限（0 = 不限制）。';
+  }
 
   renderTabs();
   rendersWarnings();
@@ -1112,6 +1118,7 @@ async function loadSettingsToForm() {
   $('setOrganizeInFolder').checked = s.organizeInFolder !== false;
   $('setChannelFolderName').value = s.channelFolderName || 'handle';
   $('setReadPlaylists').checked = s.readPlaylists !== false;
+  $('setMaxItems').value = s.maxItemsPerChannel != null ? s.maxItemsPerChannel : 300;
   $('setRateLimit').value = s.rateLimit || '';
   $('setProxy').value = s.proxy || '';
   $('setCookieFile').value = s.cookieFile || '';
@@ -1545,6 +1552,7 @@ function bind() {
       organizeInFolder: $('setOrganizeInFolder').checked,
       channelFolderName: $('setChannelFolderName').value,
       readPlaylists: $('setReadPlaylists').checked,
+      maxItemsPerChannel: Math.max(0, Number($('setMaxItems').value) || 0),
       rateLimit: $('setRateLimit').value.trim(),
       proxy: $('setProxy').value.trim(),
       cookieFile: $('setCookieFile').value.trim(),

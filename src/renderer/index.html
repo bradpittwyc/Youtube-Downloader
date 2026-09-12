@@ -235,6 +235,16 @@
                 >同时读取「播放列表」标签页（该标签页返回的是播放列表容器，需逐个展开才能拿到视频，请求较多；大频道识别会慢一些）</span
               ></label
             >
+            <div class="inline" style="margin-top: 8px; align-items: center; gap: 8px">
+              <span class="muted">每个标签页最多识别</span>
+              <input id="setMaxItems" type="number" min="0" step="50" style="width: 92px" />
+              <span class="muted">个（0 = 不限制）</span>
+            </div>
+            <small class="muted"
+              >这个上限会<b>真正传给 yt-dlp</b>，让它翻够就停。<br />
+              不限制时，像 Marvel 那种一万多条内容的频道要翻 <b>2 分 45 秒</b>；
+              限 300 个只要 <b>22 秒</b>（实测），而界面一次也只显示 80 条。</small
+            >
           </div>
 
           <div class="setting-row two-col">

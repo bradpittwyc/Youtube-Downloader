@@ -104,7 +104,17 @@ const DEFAULTS = {
   ytDlpPath: '',
   ffmpegPath: '',
   autoRetry: 3,
-  maxItemsPerChannel: 0, // 0 = 不限制
+  // 每个标签页最多识别多少个内容（0 = 不限制）。
+  //
+  // 【为什么默认不是 0】实测 @marvel 有一万多个内容，全部翻完要 3 分 13 秒，
+  // 而界面一次只显示 80 条 —— 那一万条对用户毫无用处，纯属白等。
+  // 这个上限会**真正传给 yt-dlp**（--playlist-end），让它翻够就停，
+  // 而不是把全部数据拉回来再丢掉（那样网络开销一分没省）。
+  maxItemsPerChannel: 300,
+  // 每个标签页最多展开多少个「容器」（podcasts / 播放列表这类需要二级抓取的）。
+  // 每个容器是一次独立的 yt-dlp 调用 —— Huberman 那种有 428 个容器，
+  // 全展开是几百次请求，比标签页本身慢得多。
+  maxContainersPerTab: 40,
   /**
    * 读取频道的「播放列表」标签页。
    * 该标签页返回的是播放列表容器，需要逐个二级展开才能拿到视频，
@@ -186,6 +196,13 @@ function normalize(s) {
   if (!s.subLangs || s.subLangs === 'zh-Hans,en') {
     s.subLangs = DEFAULTS.subLangs;
   }
+  // 识别上限迁移：旧默认是 0（不限），实测大频道要翻 2 分 45 秒才回来，
+  // 而界面上一次只显示 80 条 —— 那几万条纯属白等。老设置里的 0 一律升到新默认。
+  // （想要"不限"的用户可以在设置里显式改回 0，那之后不会再被迁移覆盖。）
+  if (s.maxItemsPerChannel === 0 && !s.maxItemsMigrated) {
+    s.maxItemsPerChannel = DEFAULTS.maxItemsPerChannel;
+    s.maxItemsMigrated = true;
+  }
   return s;
 }
 
@@ -209,11 +226,15 @@ function load() {
     disk.studyBilingualSrt = false;
     migrated = true;
   }
+  // 识别上限迁移（值本身在 normalize 里改，这里只负责把它落到磁盘上）
+  if (disk.maxItemsPerChannel === 0 && !disk.maxItemsMigrated) {
+    migrated = true;
+  }
   cache = normalize(Object.assign({}, DEFAULTS, disk));
   if (migrated) {
     try {
       fs.writeFileSync(file, JSON.stringify(cache, null, 2), 'utf8');
-      console.log('[settings] 已迁移：关闭旧的 .zh-en.srt 输出，改用带颜色的 .ass');
+      console.log('[settings] 已迁移设置（含频道识别上限）');
     } catch (_) {}
   }
   return cache;

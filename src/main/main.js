@@ -217,6 +217,8 @@ function startBackgroundRefresh({ target, input, skey, cacheFile, bin, settings 
       console.log('[channel] 后台刷新开始：' + (target.url || input));
       const out = await enumerator(bin, baseUrl, {
         maxItems: Number(settings.maxItemsPerChannel) || 0,
+        playlistEnd: Number(settings.maxItemsPerChannel) || 0,
+        maxContainers: Number(settings.maxContainersPerTab) || 0,
         readPlaylists: settings.readPlaylists !== false,
         auth: authArgs(settings),
         onChild: (c) => {
@@ -626,6 +628,11 @@ function registerIpc() {
       const baseUrl = target.kind === 'playlist' ? target.url : target.channelBase;
       const out = await enumerator(bin, baseUrl, {
         maxItems: Number(settings.maxItemsPerChannel) || 0,
+        // 【关键】把上限真正传给 yt-dlp（--playlist-end / 容器展开数）。
+        // 以前只传 maxItems，而它仅在拿到全部数据后做过滤 ——
+        // 大频道照样把整页翻完再丢掉，实测 @marvel 一万多条白等了 3 分 13 秒。
+        playlistEnd: Number(settings.maxItemsPerChannel) || 0,
+        maxContainers: Number(settings.maxContainersPerTab) || 0,
         readPlaylists: settings.readPlaylists !== false,
         auth: authArgs(settings),
         onProgress: (p) => send(p),
