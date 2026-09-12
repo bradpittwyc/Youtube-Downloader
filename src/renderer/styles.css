@@ -205,9 +205,12 @@ input::placeholder {
   padding: 40px;
   text-align: center;
 }
+/* 空状态的品牌图：用官方 YouTube logo（1.44:1 横长方形，所以给宽度、高度自适应） */
 .empty-icon {
-  font-size: 46px;
-  opacity: 0.75;
+  width: 96px;
+  height: auto;
+  opacity: 0.9;
+  display: block;
 }
 .empty-state h2 {
   margin: 0;
