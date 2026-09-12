@@ -360,10 +360,15 @@
               <label class="check"><input type="checkbox" id="setStudyAss" /><span>生成 .ass 双语字幕</span></label>
               <label class="check"
                 ><input type="checkbox" id="setStudyBiSrt" /><span
-                  >同时生成 .srt（兼容性更好，但两者并存时播放器可能加载它而看不到颜色）</span
+                  >同时生成 .srt 双语字幕（<b>建议保持开启</b>：ASS 有颜色，但需要支持的播放器；
+                  <b>Windows 自带的 Media Player 不支持 ASS</b>，只认 SRT，不开就一个字幕都看不到）</span
                 ></label
               >
             </div>
+            <small class="muted"
+              >两个都生成最稳妥：支持 ASS 的播放器（PotPlayer / VLC / mpv）选 ASS 轨看到颜色，
+              不支持的选 SRT 轨也能看中英对照。播放器里可以手动切轨。</small
+            >
             <div class="inline color-row">
               <span class="muted">英文字色</span><input id="setAssColorEn" type="color" />
               <span class="muted">中文字色</span><input id="setAssColorZh" type="color" />

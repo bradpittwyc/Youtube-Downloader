@@ -297,7 +297,10 @@ async function generateForVideo(o) {
     onProgress({ phase: 'write', done: 1, total: 3, label: '生成双语字幕' });
     const srtText = sub.buildBilingualSrt(res.cues, res.cueZh);
     if (srtText.trim()) {
-      writeFileSafe(paths.bilingualSrt, srtText);
+      // 带 BOM 的 UTF-8。SRT 没有声明编码的地方，而 Windows 自带播放器
+      // （Media Player / Windows Media Player）遇到无 BOM 的 UTF-8 常按 ANSI 解析，
+      // 中文会整片乱码。加 BOM 后 VLC / PotPlayer / MPC / ffmpeg 也都正常。
+      writeFileSafe(paths.bilingualSrt, '\uFEFF' + srtText);
       wrote.bilingualSrt = paths.bilingualSrt;
     }
   }

@@ -229,11 +229,26 @@ function load() {
   } catch (_) {
     disk = {};
   }
-  // 一次性迁移：升级到 ASS 双语字幕前保存的设置里没有 studyAss 字段。
-  // 那种情况下 studyBilingualSrt 还停在 true，会让 .srt 与 .ass 并存，
-  // 而播放器加载哪个没有统一规则 —— 很容易"看到的是 srt 所以没颜色"。这里自动关掉。
-  if (disk.studyAss === undefined && disk.studyBilingualSrt === true) {
-    disk.studyBilingualSrt = false;
+  // 【已撤销的一次性迁移】早期版本在这里把 studyBilingualSrt 自动关掉，
+  // 理由是「.srt 与 .ass 并存时播放器可能挑 srt，导致看不到颜色」。
+  //
+  // 这个假设是错的，而且代价很大：**Windows 自带的 Media Player（Win11 默认）
+  // 根本不支持 ASS**，只认 SRT。于是「关掉双语 SRT」= 一个字幕都看不到
+  // （作者实测：默认播放器打开视频画面里没有任何字幕）。
+  //
+  // 正确做法是两个都生成：播放器支持 ASS 就选 ASS（有颜色），
+  // 不支持就选 SRT（没颜色但能看中文）。让用户按自己的播放器选轨，
+  // 而不是替他假定一个播放器。
+  //
+  // 下面这条反向迁移把「被自动关掉」的配置重新打开。
+  // 用 bilingualSrtFixed 做标记，之后用户若真的想关，手动关掉不会再被覆盖。
+  if (disk.bilingualSrtFixed !== true) {
+    if (disk.studyBilingualSrt === false) {
+      disk.studyBilingualSrt = true;
+      migrated = true;
+      console.log('[settings] 已恢复双语 SRT 输出（ASS 需要支持的播放器，Windows 自带的读不了）');
+    }
+    disk.bilingualSrtFixed = true;
     migrated = true;
   }
   // 识别上限迁移（值本身在 normalize 里改，这里只负责把它落到磁盘上）
