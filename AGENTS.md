@@ -240,6 +240,22 @@ gh release view vX.Y.Z --json tagName,name,assets
 > 历史版本不必补：54 个 tag 逐个重建约 2 小时、占 15 GB，不划算。
 > 从当前版本起每个都发即可。
 
+#### ⚠️ GitHub 的 releases 接口很不可靠 —— 必须重试
+
+实测（v1.24.0 发布时）：`gh release create/edit` 对稍大的说明**反复返回
+HTTP 500 / 502 / 空响应**，`gh` 报 `unexpected end of JSON input`。
+同样的内容换个时间、或重试几次就成功。**不要以为是自己的命令写错了。**
+
+对策：
+
+1. **小步走**：先 `gh release create`（说明尽量短）→ 再 `gh release upload` 传附件
+   → 最后用 `gh api -X PATCH` 单独补说明。任何一步失败单独重试，不用从头来。
+2. **包一层重试**：写个小脚本循环 5~8 次、每次间隔 4 秒。实测 347 字符的 body
+   第 4 次才成功。
+3. `-f key=value`（表单）比 `--input file.json` 成功率高。
+4. **附件传完后一定要核对**，别只看命令返回的 URL：
+   `gh release view vX.Y.Z --json tagName,name,assets`
+
 ### 5.3 验证标准（作者的要求）
 
 做完一个改动，**必须实测过再声称成功**。作者明确要求：
