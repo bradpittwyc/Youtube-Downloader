@@ -1444,8 +1444,9 @@ async function loadSettingsToForm() {
   $('setAssFontZh').value = s.assFontZh || '微软雅黑';
   $('setAssLineGap').value = s.assLineGap != null ? s.assLineGap : -0.2;
   $('setAssFontScale').value = s.assFontScale || 1;
-  $('setAssWrapEn').value = s.assWrapEnChars || 44;
-  $('setAssWrapZh').value = s.assWrapZhChars || 22;
+  // 0 = 自动（铺满可用宽度）。注意不能用 || 兜底 —— 0 会被当成空值改回 44
+  $('setAssWrapEn').value = Number(s.assWrapEnChars) > 0 ? s.assWrapEnChars : 0;
+  $('setAssWrapZh').value = Number(s.assWrapZhChars) > 0 ? s.assWrapZhChars : 0;
   $('setStudyBase').value = s.studyBaseURL || '';
   $('setStudyModel').value = s.studyModel || '';
   $('setStudyConcurrency').value = s.studyConcurrency || 3;
@@ -1902,8 +1903,9 @@ function bind() {
         ? Number($('setAssLineGap').value)
         : -0.2,
       assFontScale: Number($('setAssFontScale').value) || 1,
-      assWrapEnChars: Number($('setAssWrapEn').value) || 44,
-      assWrapZhChars: Number($('setAssWrapZh').value) || 22,
+      // 0 = 自动铺满可用宽度（默认）。必须保留 0，不能用 || 兜底成 44
+      assWrapEnChars: Math.max(0, Number($('setAssWrapEn').value) || 0),
+      assWrapZhChars: Math.max(0, Number($('setAssWrapZh').value) || 0),
       studyBaseURL: $('setStudyBase').value.trim(),
       studyModel: $('setStudyModel').value.trim(),
       studyConcurrency: Number($('setStudyConcurrency').value) || 3,

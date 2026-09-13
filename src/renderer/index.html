@@ -412,10 +412,10 @@
               <input id="setAssFontScale" type="number" min="0.5" max="2" step="0.1" />
               <span class="muted" title="0 = 播放器自然排版（间距偏大）；越负越紧凑，把英文往下拉">中英行距</span>
               <input id="setAssLineGap" type="number" min="-0.5" max="0.6" step="0.05" />
-              <span class="muted">英文每行字符</span>
-              <input id="setAssWrapEn" type="number" min="20" max="80" step="2" />
-              <span class="muted">中文每行字数</span>
-              <input id="setAssWrapZh" type="number" min="8" max="40" step="1" />
+              <span class="muted" title="0 = 自动：一行尽量铺满可用宽度，真装不下才折行（推荐）。填数值则到该长度就折行">英文每行字符</span>
+              <input id="setAssWrapEn" type="number" min="0" max="80" step="2" placeholder="0 = 自动" />
+              <span class="muted" title="0 = 自动：一行尽量铺满可用宽度，真装不下才折行（推荐）。填数值则到该长度就折行">中文每行字数</span>
+              <input id="setAssWrapZh" type="number" min="0" max="40" step="1" placeholder="0 = 自动" />
             </div>
             <small class="muted"
               >分辨率自动探测并把字号/描边按比例缩放（横屏 1080p 与竖屏 Shorts 各适配一套）。<br />

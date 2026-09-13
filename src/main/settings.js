@@ -180,8 +180,13 @@ const DEFAULTS = {
    * 0 = libass 自然排版（间距恒等于英文下伸部空间，偏大）；负值把英文往下拉。
    */
   assLineGap: -0.2,
-  assWrapEnChars: 44,
-  assWrapZhChars: 22,
+  /**
+   * 折行上限。0 = 自动：不设人为上限，一行尽量铺满可用宽度，真装不下才折行。
+   * 作者明确要求「不需要换行，尽量展开」，实测放开后中文 0 条要折行、
+   * 英文只剩 0.05%。填具体数值可以更早折行（控制每行阅读长度）。
+   */
+  assWrapEnChars: 0,
+  assWrapZhChars: 0,
   /** 价格（元 / 百万 token），仅用于费用预估显示 */
   studyPriceIn: 2,
   studyPriceOut: 8,
@@ -270,6 +275,26 @@ function load() {
   // 识别上限迁移（值本身在 normalize 里改，这里只负责把它落到磁盘上）
   if (disk.maxItemsPerChannel === 0 && !disk.maxItemsMigrated) {
     migrated = true;
+  }
+  // 折行上限迁移：默认从「英文 44 字符 / 中文 22 字宽」改成 0 =【自动铺满可用宽度】。
+  // 老配置里存着 44 / 22（那正是当时的默认值），不迁移的话改动对他们完全无效。
+  // 只认这两个「旧默认值」，用户若填过别的数值（真的是自己想要的）不动。
+  // 用 wrapAutoFixed 做标记，之后想手动设回来不会再被覆盖。
+  if (disk.wrapAutoFixed !== true) {
+    let changed = false;
+    if (disk.assWrapEnChars === 44) {
+      disk.assWrapEnChars = 0;
+      changed = true;
+    }
+    if (disk.assWrapZhChars === 22) {
+      disk.assWrapZhChars = 0;
+      changed = true;
+    }
+    disk.wrapAutoFixed = true;
+    migrated = true;
+    if (changed) {
+      console.log('[settings] 字幕折行改为「自动铺满可用宽度」（原来限制在 44 / 22，会提前折行）');
+    }
   }
   cache = normalize(Object.assign({}, DEFAULTS, disk));
   if (migrated) {

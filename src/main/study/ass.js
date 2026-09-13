@@ -334,14 +334,18 @@ function buildAss(o) {
 
   // 每行能装多少字符，必须由【可用宽度 ÷ 字号】推导，否则文字会溢出画面、
   // 被 libass 自动折行（实测：竖屏 1080 宽 + 字号 89，33 个字符就装不下了）。
-  // 用户设置只作为「可读性上限」，与硬性宽度上限取较小值。
+  //
+  // 【0 = 自动】默认不设人为上限，一行尽量铺满可用宽度 ——
+  // 只有真的装不下才折行。实测放开后：中文 10882 条里 0 条要折行、
+  // 英文 10944 条里只剩 6 条（0.05%），绝大多数句子都是一行读完，最好认。
+  // 想更早折行（例如为了控制每行阅读长度）再在设置里填具体数值。
   const availW = Math.max(200, width - S(BASE.marginLR) * 2);
   const capEn = Math.floor(availW / (0.48 * S(BASE.sizeEn))); // 拉丁字符平均约 0.48 字宽
   const capZh = Math.floor(availW / (1.0 * S(BASE.sizeZh))); // 汉字按 1 字宽
-  const wantEn = Number(opt.wrapEnChars) > 0 ? Number(opt.wrapEnChars) : BASE.wrapEnChars;
-  const wantZh = Number(opt.wrapZhChars) > 0 ? Number(opt.wrapZhChars) : BASE.wrapZhChars;
-  const wrapEn = Math.max(8, Math.min(wantEn, capEn));
-  const wrapZh = Math.max(6, Math.min(wantZh, capZh));
+  const wantEn = Number(opt.wrapEnChars) > 0 ? Number(opt.wrapEnChars) : 0;
+  const wantZh = Number(opt.wrapZhChars) > 0 ? Number(opt.wrapZhChars) : 0;
+  const wrapEn = wantEn > 0 ? Math.max(8, Math.min(wantEn, capEn)) : capEn;
+  const wrapZh = wantZh > 0 ? Math.max(6, Math.min(wantZh, capZh)) : capZh;
 
   // 中英合并成【同一个事件】。
   // 为什么不用两条独立事件各挂一个样式：libass 有防重叠机制，
