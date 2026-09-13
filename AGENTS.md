@@ -146,7 +146,27 @@ Module._load = function (req, ...rest) {
 `npm test`（`tools/integration-test.js`）**会真实联网**，跑得慢（可能超过 5 分钟），
 环境变量 `YTLD_QUICK=1` 可加速。**别在验证小改动时跑它。**
 
-### 4.5 独立跑 Electron 脚本（不启动 App）
+### 4.5 改学习文档流水线？先跑这个（几秒、不花钱）
+
+学习文档是全项目最贵、最复杂、也最容易悄悄坏掉的一条链路。它有专门的端到端测试：
+
+```powershell
+npm run test:study        # 65 项断言，几秒跑完，不联网、无费用
+```
+
+**做法是把 `llm.callLLM` 换成「可编程的假模型」**：结构分析按提示词里的【总条数】
+造合法计划、逐段翻译从用户消息里解析真实序号原样回显，所以不需要 API Key。
+
+**加新断言时请顺手做一次变异测试** —— 把要防的 bug 故意放回去，确认测试真的会失败。
+这个项目付过代价：`validatePlan` 传错对象 + `takeaways/quotes` 未声明这两个 bug，
+让**任何没有翻译缓存的新视频都生不出文档**，跨了好几个版本没人发现，
+因为已缓存的视频走的是另一条旁路，看起来一切正常。
+
+⚠️ 测试里**不要靠「跑到一半抛错」来模拟中断**：流水线没有取消机制，
+抛错只打断当前 worker，**其它 worker 会继续把整篇跑完**。
+要测断点续跑就从一次完整的真实结果里截取前 K 段，构造中间结果（确定且形状一致）。
+
+### 4.6 独立跑 Electron 脚本（不启动 App）
 
 有些验证不需要整个 App，可以直接：
 
@@ -155,6 +175,15 @@ Module._load = function (req, ...rest) {
 ```
 
 （例如验证 `study/quote-card.js` 的渲染。）
+
+⚠️ **独立 Electron 脚本的 userData 默认是 `%APPDATA%\Electron`**，
+而真实 App 用 `%APPDATA%\youtube-downloader` —— 脚本开头必须补一句：
+
+```js
+app.setPath('userData', path.join(process.env.APPDATA, 'youtube-downloader'));
+```
+
+否则翻译缓存全部读不到，脚本会傻乎乎地重新翻译整篇（实测烧掉过一次费用）。
 
 ---
 

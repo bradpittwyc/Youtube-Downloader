@@ -150,11 +150,19 @@ npm run pack         # 只生成未打包目录 dist/win-unpacked
 
 | 脚本 | 作用 |
 |---|---|
-| `tools/integration-test.js` | 70+ 项断言的集成测试：链接解析、真实频道枚举、MP3 提取、暂停/断点续传、**"部分流已存在"误判回归**、错误处理、编码乱码回归。用 mock 掉 `electron` 模块直接驱动 `src/main` 的真实代码。**会真实联网，跑一次可能超过 5 分钟**（`YTLD_QUICK=1` 加速），验证小改动时别跑它 |
+| `npm run test:study` | **学习文档流水线的端到端测试（65 项断言，几秒跑完，不联网、无费用）**。把 `llm.callLLM` 换成可编程的假模型，覆盖：结构分析与计划修复、逐段翻译与汇总、**断点续跑**、Word / ASS / 双语 SRT 三种产出物的实际内容、`generateForVideo` 的缓存编排。**日常改动优先跑这个** |
+| `npm run test:integration` | 下载链路的集成测试（70+ 项断言）：链接解析、真实频道枚举、MP3 提取、暂停/断点续传、**"部分流已存在"误判回归**、错误处理、编码乱码回归。用 mock 掉 `electron` 模块直接驱动 `src/main` 的真实代码。**会真实联网，跑一次可能超过 5 分钟**（`YTLD_QUICK=1` 加速），验证小改动时别跑它 |
+| `npm test` | 上面两个都跑 |
 | `tools/ui-scenario-a.js` | 真实 DOM 事件驱动：粘贴频道 → 识别 → 切分类 → 勾选（验证渲染层↔preload↔主进程 完整接线） |
 | `tools/ui-scenario-b.js` | 真实 DOM 事件驱动：单个视频 → 选画质 → 开始下载 → 观察队列进度 |
 | `tools/ui-scenario-c.js` | 打包后（`app.isPackaged=true`）端到端验证 |
 | `tools/capture-window.ps1` | 用 `PrintWindow` 抓取指定窗口截图（不受窗口遮挡影响） |
+
+> **为什么学习文档单独一个测试文件**：它是全项目最贵、最复杂、也最容易悄悄坏掉的一条链路，
+> 而下载链路的集成测试只覆盖到 yt-dlp 那一层。代价已经付过一次 ——
+> `validatePlan` 传错对象 + `takeaways/quotes` 未声明这两个 bug，
+> 让**任何没有翻译缓存的新视频都生不出文档**，跨了好几个版本没人发现。
+> 详情见 `AGENTS.md`。
 
 UI 脚本用法（开发期）：
 
