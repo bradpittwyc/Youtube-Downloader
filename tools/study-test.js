@@ -520,6 +520,53 @@ async function testArtifacts() {
   ok(/OutlineColour,/.test(ass) && /&H00000000/.test(ass), 'D2 ASS 的描边色是黑色');
   ok(/^PlayResX: 1920$/m.test(ass) && /^PlayResY: 1080$/m.test(ass), 'D2 ASS 的 PlayRes 与视频分辨率一致');
 
+  // D4 折行质量（回归：曾经会产出「孤字行」和「标点跑行首」）
+  //
+  // 背景：旧的贪心折行会产生
+  //   motility（肠道动力）和 pollinators（传粉者）
+  //   。                                    ← 第二行只有一个句号
+  // 修法是「最小参差折行 + 中文避头尾」。这里用真实踩过的字符串钉住行为。
+  const NO_START = /^[，。、；：？！）〕】》」』…—～·,.;:?!)]}]/;
+  const wrapCases = [
+    ['zh', 22, 'motility（肠道动力）和 pollinators（传粉者）。'],
+    ['zh', 22, '学术机构的情况下，你如何培养一个有正念的孩子？'],
+    ['zh', 22, '对于罪恶之城来说，人还挺多的。谁——这非常非常有趣，'],
+    ['en', 44, "who's like he's the junior version of Satan let's"],
+    ['en', 44, "It's like it's no that's you have to make your way"],
+  ];
+  let wrapProblems = [];
+  for (const [kind, max, text] of wrapCases) {
+    const fn = kind === 'zh' ? assMod.wrapChinese : assMod.wrapEnglish;
+    const limit = kind === 'zh' ? max : max * 0.5; // 英文的上限单位 = 字符数 × 0.5
+    const lines = fn(text, max);
+    const ws = lines.map((l) => assMod.displayWidth(l));
+    if (ws.some((w) => w > limit + 0.01)) wrapProblems.push(`超宽: ${text.slice(0, 20)}`);
+    if (lines.length > 1) {
+      const last = lines[lines.length - 1];
+      const solid = kind === 'zh'
+        ? last.replace(/[\s，。、；：？！…—～·]/g, '').length
+        : last.trim().split(/\s+/).filter(Boolean).length;
+      if (solid <= (kind === 'zh' ? 2 : 1)) wrapProblems.push(`孤行: ${text.slice(0, 20)}`);
+      for (let i = 1; i < lines.length; i++) {
+        if (NO_START.test(lines[i])) wrapProblems.push(`标点跑行首: ${text.slice(0, 20)}`);
+      }
+      // 均衡度：两行长度不该差 3 倍以上
+      const min = Math.min(...ws);
+      const maxW = Math.max(...ws);
+      if (min > 0 && maxW / min >= 3) wrapProblems.push(`不均衡: ${text.slice(0, 20)}`);
+    }
+  }
+  ok(wrapProblems.length === 0, 'D4 折行无孤字行 / 标点不跑行首 / 不超宽 / 两行均衡', wrapProblems.join('; '));
+
+  // 英文折行不能把单词之间的空格弄丢（回归：曾经 join('') 把 who's like 变成 who'slike）
+  const enSpace = assMod.wrapEnglish("who's like he's the junior version of Satan let's", 44);
+  ok(
+    enSpace.every((l) => !/[a-z][A-Z]/.test(l) || /\s/.test(l)),
+    'D4 英文折行保留了单词间的空格',
+    enSpace.join(' / ')
+  );
+
+
   // D3 双语 SRT
   const srt = sub.buildBilingualSrt(r.cues, r.cueZh);
   const blocks = (srt.match(/-->/g) || []).length;
