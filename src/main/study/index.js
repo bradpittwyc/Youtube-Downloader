@@ -126,7 +126,9 @@ function readCache(videoId, srtPath, model, opts) {
     const f = cacheKey(videoId, srtPath);
     if (!fs.existsSync(f)) return null;
     const j = JSON.parse(fs.readFileSync(f, 'utf8'));
-    if (j.model !== model) return null;
+    // 用【归一化后的模型名】比对：deepseek-chat 与 deepseek-flash 其实是同一个后端，
+    // 不做归一化的话，把配置里的旧名改成新名会让所有已付费的缓存瞬间失效。
+    if (llm.canonicalModel(j.model) !== llm.canonicalModel(model)) return null;
     // allowStale：提示词升级后仍允许取回旧翻译（只补跑结构分析，不重译全文）
     if (j.promptVersion !== llm.PROMPT_VERSION && !(opts && opts.allowStale)) return null;
     // summaryDone：确认这份缓存里已经包含 Takeaways / 金句。
@@ -159,7 +161,8 @@ function readPartial(videoId, srtPath, model) {
     const f = partialKey(videoId, srtPath);
     if (!fs.existsSync(f)) return null;
     const j = JSON.parse(fs.readFileSync(f, 'utf8'));
-    if (j.model !== model) return null;
+    // 同 readCache：模型名归一化后再比，改名不会丢掉断点续跑的中间结果
+    if (llm.canonicalModel(j.model) !== llm.canonicalModel(model)) return null;
     if (j.promptVersion !== llm.PROMPT_VERSION) return null;
     if (!Array.isArray(j.plan) || !j.plan.length) return null;
     if (!j.segments || !Object.keys(j.segments).length) return null;

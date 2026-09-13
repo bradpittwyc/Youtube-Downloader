@@ -93,6 +93,7 @@ contextBridge.exposeInMainWorld('api', {
 
   study: {
     testConnection: (override) => ipcRenderer.invoke('study:test-connection', override),
+    listModels: (override) => ipcRenderer.invoke('study:list-models', override),
     estimate: (payload) => ipcRenderer.invoke('study:estimate', payload),
     generate: (key, force) => ipcRenderer.invoke('study:generate', { key, force }),
     keyInfo: () => ipcRenderer.invoke('study:key-info'),

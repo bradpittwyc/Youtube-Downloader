@@ -296,6 +296,24 @@ function load() {
       console.log('[settings] 字幕折行改为「自动铺满可用宽度」（原来限制在 44 / 22，会提前折行）');
     }
   }
+  // 模型名迁移：deepseek-chat / deepseek-reasoner 是旧名字，
+  // 服务端虽然还在静默转发（响应里 model 已经是 deepseek-flash），
+  // 但 /v1/models 里已经不再列出它们，随时可能彻底停用。
+  //
+  // 【为什么敢改】缓存键是 videoId + srtPath，模型名只是另外比对的；
+  // 而且 llm.canonicalModel() 会把新旧名字归一化成同一个身份，
+  // 所以改名字**不会让已有的翻译缓存失效**，不用重新花钱。
+  // 只迁移「恰好等于旧默认名」的情况，用户自己填的其它模型一律不动。
+  if (disk.modelNameFixed !== true) {
+    const OLD_TO_NEW = { 'deepseek-chat': 'deepseek-flash', 'deepseek-reasoner': 'deepseek-v4-pro' };
+    const cur = String(disk.studyModel || '').trim();
+    if (OLD_TO_NEW[cur]) {
+      disk.studyModel = OLD_TO_NEW[cur];
+      console.log(`[settings] 模型名 ${cur} → ${disk.studyModel}（旧名已被服务端转发，改成正式名字；缓存不受影响）`);
+    }
+    disk.modelNameFixed = true;
+    migrated = true;
+  }
   cache = normalize(Object.assign({}, DEFAULTS, disk));
   if (migrated) {
     try {

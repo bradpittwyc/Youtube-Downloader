@@ -437,7 +437,21 @@
             </div>
             <div>
               <label>模型名</label>
-              <input id="setStudyModel" type="text" spellcheck="false" placeholder="deepseek-chat" />
+              <!-- 既能下拉选，也能手填：有些 OpenAI 兼容端点没实现 /models，
+                   不能因为拉不到列表就把用户卡死。 -->
+              <div class="inline">
+                <input
+                  id="setStudyModel"
+                  type="text"
+                  spellcheck="false"
+                  list="studyModelList"
+                  placeholder="deepseek-chat"
+                />
+                <button id="btnFetchModels" class="btn tiny" title="调用 GET /models 拉取（免费，不消耗 token）">
+                  获取可用模型
+                </button>
+              </div>
+              <datalist id="studyModelList"></datalist>
             </div>
           </div>
 
@@ -447,6 +461,7 @@
               <button id="btnClearKey" class="btn tiny">清除 Key</button>
               <span id="llmStatus" class="muted">未测试</span>
             </div>
+            <small id="llmModelNote" class="muted"></small>
             <small class="muted"
               >API Key 使用系统凭据加密（Windows DPAPI）后保存在本机，并<b>不会</b>回传到界面。留空即保持原值。</small
             >

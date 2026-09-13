@@ -8,11 +8,91 @@
 const DEFAULT_TIMEOUT_MS = 300000;
 
 /**
+ * 已知模型的档案。
+ *
+ * 【为什么要这张表】各家模型的行为差异很大，尤其是**推理模型**（会先"想"再答，
+ * 思维链单独放在 reasoning_content 里）。实测 deepseek-flash / deepseek-v4-pro：
+ *   · 「思考」的 token 也算进 max_tokens —— 给小了会返回【空 content】
+ *   · 关掉思考后同样的翻译任务快 40%、省 27% 的 token，质量没差别
+ *   · v4-pro 开着思考跑 45 条字幕要 80 秒（flash 只要 6 秒），容易把预算打满导致 JSON 截断
+ * 所以「要不要思考」必须按模型和用途分别决定，不能一刀切。
+ */
+const MODEL_PROFILES = {
+  'deepseek-flash': {
+    label: 'deepseek-flash（推荐 · 快 · 省）',
+    reasoning: true,
+    priceIn: 2,
+    priceOut: 8,
+    note: '原 deepseek-chat 的实际后端，逐段翻译实测 6~10 秒 / 45 条',
+  },
+  'deepseek-v4-pro': {
+    label: 'deepseek-v4-pro（更强 · 慢 8 倍 · 贵）',
+    reasoning: true,
+    priceIn: 4,
+    priceOut: 16,
+    note: '思考 token 消耗大，45 条字幕实测 80 秒，容易把 max_tokens 打满',
+  },
+  // 旧名字。服务器会静默转发到 deepseek-flash（响应里 model 字段就是 deepseek-flash），
+  // 但 /v1/models 已经不再列出它，随时可能彻底停用。
+  'deepseek-chat': {
+    label: 'deepseek-chat（旧名 · 已转发到 flash）',
+    reasoning: true,
+    deprecated: 'deepseek-flash',
+    priceIn: 2,
+    priceOut: 8,
+    note: '这是旧模型名，服务端已转发到 deepseek-flash，建议改过来',
+  },
+  'deepseek-reasoner': {
+    label: 'deepseek-reasoner（旧名 · 推理专用）',
+    reasoning: true,
+    deprecated: 'deepseek-v4-pro',
+    priceIn: 4,
+    priceOut: 16,
+    note: '旧模型名，已由 v4-pro 取代',
+  },
+};
+
+/**
+ * 模型名别名归一化 —— **只用于缓存比对**，不改变实际请求用的名字。
+ *
+ * 为什么要它：缓存键是 `videoId + srtPath`，而模型名是另外单独比对的
+ * （`if (j.model !== model) return null`）。所以只要把配置里的
+ * `deepseek-chat` 改成 `deepseek-flash`，17 份已付费的翻译缓存会全部失效。
+ * 归一化之后「同一个后端的不同名字」共用缓存，改名不花钱。
+ */
+const MODEL_ALIASES = {
+  'deepseek-chat': 'deepseek-flash',
+  'deepseek-reasoner': 'deepseek-v4-pro',
+};
+
+function canonicalModel(name) {
+  const m = String(name == null ? '' : name).trim();
+  return MODEL_ALIASES[m.toLowerCase()] || m;
+}
+
+/** 取模型档案；不认识的模型返回保守默认（当作推理模型、不关思考） */
+function modelProfile(name) {
+  const key = String(name == null ? '' : name).trim().toLowerCase();
+  if (MODEL_PROFILES[key]) return Object.assign({ id: key }, MODEL_PROFILES[key]);
+  return {
+    id: key,
+    label: key,
+    reasoning: true, // 保守：宁可多给预算，也不要返回空 content
+    priceIn: 2,
+    priceOut: 8,
+    note: '未知模型，按推理模型保守处理',
+  };
+}
+
+/**
  * 提示词版本号。改动提示词时递增，用于让旧的翻译缓存自动失效
  * （否则会拿旧提示词产出的结果去生成新文档，很难排查）。
  */
 // 4：结构分析同时返回 takeaways（全文要点）与 quotes（金句）
 const PROMPT_VERSION = 4;
+
+/** 推理模型「关掉思考」时要带的参数（实测两个名字都生效） */
+const NO_THINK = { reasoning_effort: 'none' };
 
 function joinUrl(baseURL, suffix) {
   return String(baseURL).replace(/\/+$/, '') + suffix;
@@ -22,7 +102,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * 调用一次 chat/completions，带 429/5xx 退避重试。
- * @returns {Promise<{content:string, usage:object}>}
+ *
+ * @param {object} cfg  { baseURL, apiKey, model, temperature }
+ * @param {Array}  messages
+ * @param {number} maxTokens
+ * @param {object} opts
+ *   · attempts / timeoutMs
+ *   · reasoning: 'off' 关掉思考（推理模型专用）。翻译这种任务实测关掉更快更省，
+ *     而且能避免思考把 max_tokens 吃光导致返回空 content。
+ * @returns {Promise<{content:string, usage:object, finishReason:string}>}
  */
 async function callLLM(cfg, messages, maxTokens = 8192, opts = {}) {
   const url = joinUrl(cfg.baseURL, '/chat/completions');
@@ -33,6 +121,7 @@ async function callLLM(cfg, messages, maxTokens = 8192, opts = {}) {
     max_tokens: maxTokens,
     stream: false,
   };
+  if (opts.reasoning === 'off') Object.assign(body, NO_THINK);
   const attempts = opts.attempts || 4;
   let lastErr = null;
 
@@ -66,15 +155,44 @@ async function callLLM(cfg, messages, maxTokens = 8192, opts = {}) {
         throw new Error('响应不是合法 JSON: ' + text.slice(0, 150));
       }
       const choice = json.choices && json.choices[0];
-      const content = choice && choice.message && choice.message.content;
-      if (!content) throw new Error('响应里没有 content: ' + text.slice(0, 150));
+      const msg = (choice && choice.message) || {};
+      const content = msg.content;
+      const finish = (choice && choice.finish_reason) || '';
+      const reasoningTokens =
+        (json.usage && json.usage.completion_tokens_details &&
+          json.usage.completion_tokens_details.reasoning_tokens) || 0;
+
+      // 【必须先判断截断，再判断空 content】
+      // 推理模型的思考 token 也算进 max_tokens：预算给小了会 finish_reason=length
+      // 且 content 为空（或 JSON 被从中间截断）。这**不是格式错误，重试没有意义** ——
+      // 重试只会再烧一次钱、再被截断一次。
+      if (finish === 'length') {
+        const hint =
+          reasoningTokens > 0
+            ? `模型把 ${reasoningTokens} 个 token 花在「思考」上，把 max_tokens(${maxTokens}) 占满了`
+            : `max_tokens(${maxTokens}) 不够`;
+        const e = new Error(`输出被截断：${hint}。请调大预算或改用非推理模型。`);
+        e.code = 'TRUNCATED';
+        e.noRetry = true;
+        throw e;
+      }
+      if (!content) {
+        const ranOut = reasoningTokens > 0 ? `（思考用了 ${reasoningTokens} 个 token）` : '';
+        const e = new Error(
+          `响应里没有 content${ranOut}。若为推理模型，多半是 max_tokens 太小 —— 思考会先吃掉预算。原文：` +
+            text.slice(0, 150)
+        );
+        e.code = 'EMPTY_CONTENT';
+        throw e;
+      }
       return {
         content,
         usage: json.usage || {},
-        finishReason: choice.finish_reason || '',
+        finishReason: finish,
       };
     } catch (err) {
       lastErr = err;
+      if (err && err.noRetry) throw err; // 截断不重试
       const msg = String(err && err.message);
       const retriable = /abort|timeout|ECONN|ETIMEDOUT|socket|429|50\d/.test(msg);
       if (retriable && i < attempts - 1) {
@@ -89,7 +207,46 @@ async function callLLM(cfg, messages, maxTokens = 8192, opts = {}) {
   throw lastErr || new Error('调用失败');
 }
 
-/** 连通性测试（对应界面上的「测试连接」按钮） */
+/**
+ * 拉取该 API 支持的模型列表（GET /v1/models，**免费，不消耗 token**）。
+ * 不是所有 OpenAI 兼容端点都实现它，所以失败时返回 ok:false 而不是抛错 ——
+ * 界面据此把模型输入框退化成手填即可，不该阻塞用户。
+ */
+async function listModels(cfg) {
+  const url = joinUrl(cfg.baseURL, '/models');
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 20000);
+    let res;
+    try {
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${cfg.apiKey}` },
+        signal: ctrl.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    const text = await res.text();
+    if (!res.ok) return { ok: false, error: `HTTP ${res.status}: ${text.slice(0, 120)}`, models: [] };
+    const j = JSON.parse(text);
+    const models = (j.data || [])
+      .map((m) => String((m && m.id) || '').trim())
+      .filter(Boolean)
+      .sort();
+    return { ok: true, models };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e), models: [] };
+  }
+}
+
+/**
+ * 连通性测试（对应界面上的「测试连接」按钮）。
+ *
+ * 【max_tokens 不能给太小】原来是 16。推理模型的思考 token 也算进 max_tokens，
+ * 16 个 token 会被思考全部吃光 → 返回空 content → 测试永远失败，
+ * 哪怕配置完全正确（实测 deepseek-flash / deepseek-v4-pro 都是这个下场）。
+ * 给足预算，并且关掉思考 —— 这只是一次「能不能通」的探测，不需要它思考。
+ */
 async function testConnection(cfg) {
   const t0 = Date.now();
   const r = await callLLM(
@@ -98,8 +255,8 @@ async function testConnection(cfg) {
       { role: 'system', content: '你是测试助手，只回答用户要求的内容。' },
       { role: 'user', content: '请只回复两个字：正常' },
     ],
-    16,
-    { attempts: 1, timeoutMs: 30000 }
+    512,
+    { attempts: 1, timeoutMs: 60000, reasoning: 'off' }
   );
   return { ok: true, ms: Date.now() - t0, reply: r.content.trim(), usage: r.usage };
 }
@@ -313,6 +470,7 @@ function validateCues(seg, expectedIdx) {
 module.exports = {
   callLLM,
   testConnection,
+  listModels,
   parseJsonLoose,
   STRUCT_SYSTEM,
   TRANSLATE_SYSTEM,
@@ -324,4 +482,8 @@ module.exports = {
   validateCues,
   parseCuesField,
   PROMPT_VERSION,
+  MODEL_PROFILES,
+  MODEL_ALIASES,
+  canonicalModel,
+  modelProfile,
 };

@@ -341,7 +341,11 @@ async function runStudyPipeline(o) {
             { role: 'system', content: llm.TRANSLATE_SYSTEM },
             { role: 'user', content: userMsg },
           ],
-          8192
+          8192,
+          // 翻译是「照本宣科」的活，不需要推理。实测对推理模型关掉思考后
+          // 同一段 45 条字幕：10.5s → 6.3s、2959 → 2149 token，产出质量没差别。
+          // 也能避免思考把 max_tokens 吃光导致返回空 content。
+          { reasoning: 'off' }
         );
         usage.prompt += r.usage.prompt_tokens || 0;
         usage.completion += r.usage.completion_tokens || 0;

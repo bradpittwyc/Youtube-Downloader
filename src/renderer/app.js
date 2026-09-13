@@ -1449,6 +1449,7 @@ async function loadSettingsToForm() {
   $('setAssWrapZh').value = Number(s.assWrapZhChars) > 0 ? s.assWrapZhChars : 0;
   $('setStudyBase').value = s.studyBaseURL || '';
   $('setStudyModel').value = s.studyModel || '';
+  applyModelNote(null); // 打开设置时就把模型说明与单价同步好
   $('setStudyConcurrency').value = s.studyConcurrency || 3;
   $('setStudyMaxSeg').value = s.studyMaxSegCues || 45;
   $('setStudyPriceIn').value = s.studyPriceIn != null ? s.studyPriceIn : 2;
@@ -1492,6 +1493,73 @@ async function refreshKernelInfo() {
     toast('下载内核异常（yt-dlp 或 ffmpeg 不可用），请在设置里查看', 'err', 10000);
   }
   return info;
+}
+
+/* ==================== 模型选项 ==================== */
+
+/**
+ * 已知模型档案的一份前端副本，用于在还没拉取列表时也能显示说明与单价。
+ * 与 src/main/study/llm.js 的 MODEL_PROFILES 保持一致 —— 主进程那份是准的，
+ * 拉取列表后会用主进程返回的 profiles 覆盖这里。
+ */
+const MODEL_NOTES = {
+  'deepseek-flash': { label: 'deepseek-flash（推荐 · 快 · 省）', priceIn: 2, priceOut: 8, deprecated: null },
+  'deepseek-v4-pro': { label: 'deepseek-v4-pro（更强 · 慢 8 倍 · 贵）', priceIn: 4, priceOut: 16, deprecated: null },
+  'deepseek-chat': { label: 'deepseek-chat（旧名 · 已转发到 flash）', priceIn: 2, priceOut: 8, deprecated: 'deepseek-flash' },
+  'deepseek-reasoner': { label: 'deepseek-reasoner（旧名 · 推理专用）', priceIn: 4, priceOut: 16, deprecated: 'deepseek-v4-pro' },
+};
+
+/** 输入模型名时：更新提示文字，并把单价同步过去（否则费用预估会错） */
+function applyModelNote(profiles) {
+  const name = $('setStudyModel').value.trim();
+  const p = (profiles && profiles[name]) || MODEL_NOTES[name] || null;
+  const note = $('llmModelNote');
+  if (!p) {
+    note.textContent = name ? '未收录的模型：按推理模型保守处理（不主动关思考、预算给足）' : '';
+    return;
+  }
+  const parts = [p.label || name];
+  if (p.deprecated) parts.push(`⚠ 建议改用 ${p.deprecated}`);
+  if (p.priceIn != null) {
+    parts.push(`单价 ￥${p.priceIn}/￥${p.priceOut} 每百万 token`);
+    // 单价跟着模型走，否则换了模型费用预估还按旧价算
+    if ($('setStudyPriceIn')) $('setStudyPriceIn').value = p.priceIn;
+    if ($('setStudyPriceOut')) $('setStudyPriceOut').value = p.priceOut;
+  }
+  note.textContent = parts.join(' · ');
+}
+
+/** 拉取该端点支持的模型，填进 datalist */
+async function fetchModelList() {
+  const btn = $('btnFetchModels');
+  const note = $('llmModelNote');
+  btn.disabled = true;
+  note.textContent = '正在拉取模型列表…';
+  try {
+    const r = await api.study.listModels({
+      studyBaseURL: $('setStudyBase').value.trim(),
+      // 注意：Key 输入框留空表示「不修改」，此时要让主进程用已存的那把。
+      // 传空字符串会把它覆盖成空 → 主进程直接报「请先填写 API Key」。
+      // （secret.open() 对明文原样返回，所以这里传明文即可）
+      ...($('setStudyKey').value.trim() ? { studyApiKey: $('setStudyKey').value.trim() } : {}),
+    });
+    if (!r || !r.ok) {
+      note.textContent = '❌ 拉取失败：' + ((r && r.error) || '未知错误') + '（可直接手填模型名）';
+      return;
+    }
+    $('studyModelList').innerHTML = r.models
+      .map((m) => {
+        const p = (r.profiles && r.profiles[m]) || {};
+        return `<option value="${esc(m)}">${esc(p.label || m)}</option>`;
+      })
+      .join('');
+    note.textContent = `✅ 拉到 ${r.models.length} 个模型：${r.models.join('、')}（点输入框选择）`;
+    applyModelNote(r.profiles);
+  } catch (e) {
+    note.textContent = '❌ 拉取失败：' + e.message + '（可直接手填模型名）';
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 /* ==================== 事件绑定 ==================== */
@@ -1694,6 +1762,10 @@ function bind() {
   $('studyDoc').addEventListener('change', (e) => api.settings.set({ studyDoc: e.target.checked }));
 
   // 学习文档：测试连接 / 清除 Key
+  $('btnFetchModels').addEventListener('click', fetchModelList);
+  // 改模型名时同步提示与单价（费用预估要跟着模型走，否则换模型后预估是错的）
+  $('setStudyModel').addEventListener('input', () => applyModelNote(null));
+
   $('btnTestLLM').addEventListener('click', async () => {
     const st = $('llmStatus');
     st.textContent = '测试中…';

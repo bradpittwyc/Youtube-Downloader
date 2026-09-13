@@ -392,6 +392,21 @@ function registerIpc() {
     }
   });
 
+  // 拉取该端点支持的模型列表（GET /models，免费不消耗 token）。
+  // 界面据此把「模型名」从纯手填变成下拉选项；拿不到就退化成手填，不阻塞。
+  ipcMain.handle('study:list-models', async (_e, override) => {
+    const base = settingsStore.load();
+    const merged = Object.assign({}, base, override || {});
+    const cfg = study.llmConfigFrom(merged);
+    if (!cfg.baseURL) return { ok: false, error: '请先填写 API 地址', models: [], profiles: {} };
+    if (!cfg.apiKey) return { ok: false, error: '请先填写 API Key', models: [], profiles: {} };
+    const r = await studyLlm.listModels(cfg);
+    // 顺手带上每个模型的档案（是不是推理模型、单价、界面显示名）
+    r.profiles = {};
+    for (const m of r.models) r.profiles[m] = studyLlm.modelProfile(m);
+    return r;
+  });
+
   ipcMain.handle('study:estimate', async (_e, { srtPath, durationMs }) => {
     try {
       if (!srtPath || !fs.existsSync(srtPath)) return { ok: false, error: '字幕文件不存在' };
