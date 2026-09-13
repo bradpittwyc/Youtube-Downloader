@@ -151,6 +151,22 @@ input::placeholder {
 .brand-text strong {
   font-size: 14px;
 }
+/* 版本号：跟在标题下面，小一号、灰一点，不抢标题的视线。
+   有更新时由 app.js 加上 .has-update 变成高亮色。 */
+.brand-version {
+  font-size: 10.5px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  margin-top: 1px;
+  cursor: default;
+}
+.brand-version.has-update {
+  color: var(--ok);
+  cursor: pointer;
+}
+.brand-version.has-update::after {
+  content: ' · 有新版本';
+}
 .fetch-row {
   display: flex;
   gap: 8px;

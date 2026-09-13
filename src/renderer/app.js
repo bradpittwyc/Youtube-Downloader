@@ -1850,6 +1850,10 @@ function bind() {
   $('btnUpdateBadge').addEventListener('click', () => {
     if (pendingUpdate) showUpdateModal(pendingUpdate);
   });
+  // 左上角版本号：发现有新版时点它也能打开更新弹窗
+  $('brandVersion').addEventListener('click', () => {
+    if (pendingUpdate) showUpdateModal(pendingUpdate);
+  });
   $('btnCloseUpdate').addEventListener('click', closeUpdateModal);
   $('btnUpdateSkip').addEventListener('click', closeUpdateModal);
   $('updateModal').addEventListener('click', (e) => {
@@ -1889,6 +1893,12 @@ function bind() {
     if (st) {
       st.textContent = `发现新版本 v${info.latest}`;
       st.style.color = 'var(--ok)';
+    }
+    // 左上角的版本号也标出来 —— 点它直接打开更新弹窗
+    const bv = $('brandVersion');
+    if (bv) {
+      bv.classList.add('has-update');
+      bv.title = `当前 v${info.current}，可升级到 v${info.latest}　（点击查看）`;
     }
     // 不直接弹窗打断 —— 顶栏闪一个徽标，用户点了再看
   });  // 改模型名时同步提示与单价（费用预估要跟着模型走，否则换模型后预估是错的）
@@ -2258,6 +2268,11 @@ async function enqueue(items) {
   const info = await api.info();
   if (!info.isPackaged) {
     console.log('dev mode', info);
+  }
+  // 左上角显示版本号（启动即填，不依赖任何网络请求）
+  if ($('brandVersion')) {
+    $('brandVersion').textContent = 'v' + info.version;
+    $('brandVersion').title = `YouTube 下载器 v${info.version}　Electron ${info.electron}　Node ${info.node}`;
   }
 })();
 })();
