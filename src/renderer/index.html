@@ -595,6 +595,12 @@
         <div id="historyEmpty" class="history-empty hidden">
           还没有下载记录<br /><span class="muted">下载完成的视频会自动记录在这里</span>
         </div>
+        <!-- 历史翻页：每页固定 20 条。只有一页时整条隐藏。 -->
+        <div id="historyFoot" class="history-foot hidden">
+          <span id="hPageInfo" class="q-page-info"></span>
+          <button id="hPagePrev" class="btn tiny" title="上一页">‹</button>
+          <button id="hPageNext" class="btn tiny" title="下一页">›</button>
+        </div>
       </div>
     </div>
 

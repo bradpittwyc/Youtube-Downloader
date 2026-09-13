@@ -1390,6 +1390,26 @@ input::placeholder {
   color: var(--text-dim);
   line-height: 2;
 }
+/* 历史翻页：贴在弹窗底部右侧，翻页按钮复用队列那套样式 */
+.history-foot {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 8px 16px 12px;
+  border-top: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.history-foot .btn.tiny {
+  min-width: 26px;
+  padding: 2px 6px;
+  font-size: 14px;
+  line-height: 1.1;
+}
+.history-foot .btn.tiny:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
 .modal-foot {
   padding: 12px 18px;
   border-top: 1px solid var(--line);

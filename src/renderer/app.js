@@ -1176,6 +1176,9 @@ async function runNetDiag() {
  * 这也是为什么这里不复用 state.queue —— 两者的数据源本来就不同。
  */
 let historyCache = [];
+/** 历史每页固定条数（和队列一样是固定值，窗口大小变化时条目不会跳来跳去） */
+const HISTORY_PAGE_SIZE = 20;
+let historyPage = 1;
 
 function fmtHistoryDate(iso) {
   if (!iso) return '';
@@ -1192,21 +1195,42 @@ function fmtUploadDate(s) {
   return `${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}`;
 }
 
+/** 当前筛选条件下的全部条目 */
+function historyFiltered() {
+  const kw = $('historyFilter').value.trim().toLowerCase();
+  if (!kw) return historyCache;
+  return historyCache.filter(
+    (x) =>
+      String(x.title).toLowerCase().includes(kw) || String(x.channel).toLowerCase().includes(kw)
+  );
+}
+
 function renderHistory() {
   const list = $('historyList');
-  const kw = $('historyFilter').value.trim().toLowerCase();
-  const items = kw
-    ? historyCache.filter(
-        (x) =>
-          String(x.title).toLowerCase().includes(kw) || String(x.channel).toLowerCase().includes(kw)
-      )
-    : historyCache;
+  const all = historyFiltered();
+  const pages = Math.max(1, Math.ceil(all.length / HISTORY_PAGE_SIZE));
+  if (!Number.isFinite(historyPage) || historyPage < 1) historyPage = 1;
+  if (historyPage > pages) historyPage = pages;
+  const from = (historyPage - 1) * HISTORY_PAGE_SIZE;
+  const items = all.slice(from, from + HISTORY_PAGE_SIZE);
 
   $('historyEmpty').classList.toggle('hidden', items.length > 0);
   list.classList.toggle('hidden', items.length === 0);
+  const kw = $('historyFilter').value.trim();
   $('historyCount').textContent = kw
-    ? `${items.length} / ${historyCache.length} 个`
+    ? `${all.length} / ${historyCache.length} 个`
     : `共 ${historyCache.length} 个`;
+
+  // 翻页条：只有一页时隐藏
+  const foot = $('historyFoot');
+  foot.classList.toggle('hidden', all.length === 0 || pages <= 1);
+  if (!foot.classList.contains('hidden')) {
+    $('hPageInfo').textContent = `${from + 1}–${Math.min(all.length, from + HISTORY_PAGE_SIZE)} / ${
+      all.length
+    }　第 ${historyPage}/${pages} 页`;
+    $('hPagePrev').disabled = historyPage <= 1;
+    $('hPageNext').disabled = historyPage >= pages;
+  }
 
   list.innerHTML = items
     .map((x) => {
@@ -1226,6 +1250,16 @@ function renderHistory() {
     .join('');
 }
 
+/** 历史翻页；dir = -1 上一页 / 1 下一页 */
+function gotoHistoryPage(dir) {
+  const pages = Math.max(1, Math.ceil(historyFiltered().length / HISTORY_PAGE_SIZE));
+  const next = Math.min(pages, Math.max(1, historyPage + dir));
+  if (next === historyPage) return;
+  historyPage = next;
+  renderHistory();
+  $('historyList').scrollTop = 0;
+}
+
 async function openHistory(fresh) {
   $('historyModal').classList.remove('hidden');
   const r = await api.downloads.index({ fresh: !!fresh });
@@ -1233,6 +1267,7 @@ async function openHistory(fresh) {
     .slice()
     // 按下载时间倒序：最近下的排最前（边车里有 at 字段）
     .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  historyPage = 1; // 每次打开都从第一页开始
   renderHistory();
 }
 
@@ -1767,7 +1802,12 @@ function bind() {
   $('historyModal').addEventListener('click', (e) => {
     if (e.target === $('historyModal')) closeHistory();
   });
-  $('historyFilter').addEventListener('input', renderHistory);
+  $('historyFilter').addEventListener('input', () => {
+    historyPage = 1; // 换了筛选条件就回到第 1 页，否则可能停在一个空页上
+    renderHistory();
+  });
+  $('hPagePrev').addEventListener('click', () => gotoHistoryPage(-1));
+  $('hPageNext').addEventListener('click', () => gotoHistoryPage(1));
   $('btnHistoryRescan').addEventListener('click', async () => {
     await openHistory(true); // 忽略缓存重扫磁盘
     await loadDownloadsIndex(true); // 「已下载」标记也跟着刷新
