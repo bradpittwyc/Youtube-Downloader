@@ -142,7 +142,13 @@
             <button id="btnCancelAll" class="btn tiny danger" title="停止所有下载，并把队列里未完成的任务全部移除">
               全部取消
             </button>
-            <button id="btnClearDone" class="btn tiny" title="清除已完成">清除已完成</button>
+            <button
+              id="btnClearDone"
+              class="btn tiny"
+              title="只把已完成的任务从队列里移走，腾出队列空间。&#10;文件仍在磁盘上，「下载历史」里的记录也一条都不会少。"
+            >
+              清除已完成
+            </button>
           </div>
         </div>
         <div id="queueStats" class="queue-stats"></div>
@@ -159,12 +165,22 @@
         <div id="queueList" class="queue-list"></div>
         <div id="queueEmpty" class="queue-empty">队列为空<br /><span class="muted">勾选视频后点「开始下载」</span></div>
 
-        <!-- 队列翻页：固定每页 8 条，控件贴在区块右下角。
-             条数多了以后整列一直往下滚很难定位，翻页比无限滚动好找。 -->
-        <div id="queuePager" class="queue-pager hidden">
-          <span id="qPageInfo" class="q-page-info"></span>
-          <button id="qPagePrev" class="btn tiny" title="上一页">‹</button>
-          <button id="qPageNext" class="btn tiny" title="下一页">›</button>
+        <!-- 队列底部：左边「下载历史」，右边翻页。
+             历史按钮【不能】放进翻页条里 —— 只有一页时翻页条会整条隐藏，
+             入口会跟着一起消失。 -->
+        <div class="queue-foot">
+          <button
+            id="btnHistory"
+            class="btn tiny"
+            title="查看过往所有下载（记录在磁盘上，清除队列不会丢）"
+          >
+            下载历史
+          </button>
+          <div id="queuePager" class="queue-pager hidden">
+            <span id="qPageInfo" class="q-page-info"></span>
+            <button id="qPagePrev" class="btn tiny" title="上一页">‹</button>
+            <button id="qPageNext" class="btn tiny" title="下一页">›</button>
+          </div>
         </div>
       </aside>
     </main>
@@ -554,6 +570,30 @@
 
         <div class="modal-foot">
           <button id="btnSaveSettings" class="btn primary">保存设置</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 下载历史 ============
+         数据来自磁盘上的边车文件（<视频名>.video.json），不是队列。
+         所以「清除已完成」只清队列显示，历史一条都不会少；
+         换机器 / 重装后重扫下载目录也照样能还原。 -->
+    <div id="historyModal" class="modal hidden">
+      <div class="modal-card history-card">
+        <div class="modal-head">
+          <h3>下载历史</h3>
+          <button id="btnCloseHistory" class="btn ghost">✕</button>
+        </div>
+        <div class="history-toolbar">
+          <input id="historyFilter" type="text" placeholder="按标题 / 频道筛选…" spellcheck="false" />
+          <span id="historyCount" class="muted"></span>
+          <button id="btnHistoryRescan" class="btn tiny" title="重新扫描下载目录，把手工放进来的文件也认出来">
+            重新扫描
+          </button>
+        </div>
+        <div id="historyList" class="history-list"></div>
+        <div id="historyEmpty" class="history-empty hidden">
+          还没有下载记录<br /><span class="muted">下载完成的视频会自动记录在这里</span>
         </div>
       </div>
     </div>

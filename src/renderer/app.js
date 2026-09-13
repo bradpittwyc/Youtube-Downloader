@@ -1164,6 +1164,82 @@ async function runNetDiag() {
   }
 }
 
+/* ==================== 下载历史 ==================== */
+
+/**
+ * 下载历史完全来自磁盘上的【边车文件】（<视频名>.video.json），不是队列。
+ *
+ * 这样设计的好处：
+ *   · 「清除已完成」只清队列显示，历史一条都不会少
+ *   · 队列被清空、换机器、重装之后，重新扫一遍下载目录就能还原
+ *   · 用户手工把视频拷进下载目录，重新扫描也能认出来
+ * 这也是为什么这里不复用 state.queue —— 两者的数据源本来就不同。
+ */
+let historyCache = [];
+
+function fmtHistoryDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+/** 把 uploadDate（20260831）格式化成 2026-08-31 */
+function fmtUploadDate(s) {
+  const t = String(s || '');
+  if (!/^\d{8}$/.test(t)) return t;
+  return `${t.slice(0, 4)}-${t.slice(4, 6)}-${t.slice(6, 8)}`;
+}
+
+function renderHistory() {
+  const list = $('historyList');
+  const kw = $('historyFilter').value.trim().toLowerCase();
+  const items = kw
+    ? historyCache.filter(
+        (x) =>
+          String(x.title).toLowerCase().includes(kw) || String(x.channel).toLowerCase().includes(kw)
+      )
+    : historyCache;
+
+  $('historyEmpty').classList.toggle('hidden', items.length > 0);
+  list.classList.toggle('hidden', items.length === 0);
+  $('historyCount').textContent = kw
+    ? `${items.length} / ${historyCache.length} 个`
+    : `共 ${historyCache.length} 个`;
+
+  list.innerHTML = items
+    .map((x) => {
+      const meta = [];
+      if (x.channel) meta.push(`<span>📺 ${esc(x.channel)}</span>`);
+      if (x.duration) meta.push(`<span>⏱ ${fmtDuration(x.duration)}</span>`);
+      if (x.uploadDate) meta.push(`<span>发布于 ${fmtUploadDate(x.uploadDate)}</span>`);
+      if (x.at) meta.push(`<span>下载于 ${fmtHistoryDate(x.at)}</span>`);
+      return `<div class="h-item" data-hpath="${esc(x.videoPath || '')}">
+        <div class="h-main">
+          <div class="h-title" title="${esc(x.title)}">${esc(x.title || x.id)}</div>
+          <div class="h-meta">${meta.join('')}</div>
+        </div>
+        <button class="btn tiny" data-hopen="${esc(x.videoPath || '')}" title="打开所在文件夹">打开</button>
+      </div>`;
+    })
+    .join('');
+}
+
+async function openHistory(fresh) {
+  $('historyModal').classList.remove('hidden');
+  const r = await api.downloads.index({ fresh: !!fresh });
+  historyCache = ((r && r.list) || [])
+    .slice()
+    // 按下载时间倒序：最近下的排最前（边车里有 at 字段）
+    .sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  renderHistory();
+}
+
+function closeHistory() {
+  $('historyModal').classList.add('hidden');
+}
+
 /* ==================== 识别 ==================== */
 
 async function doFetch(force) {
@@ -1683,6 +1759,26 @@ function bind() {
   $('btnCloseSettings').addEventListener('click', () => $('settingsModal').classList.add('hidden'));
   $('settingsModal').addEventListener('click', (e) => {
     if (e.target === $('settingsModal')) $('settingsModal').classList.add('hidden');
+  });
+
+  // 下载历史
+  $('btnHistory').addEventListener('click', () => openHistory(false));
+  $('btnCloseHistory').addEventListener('click', closeHistory);
+  $('historyModal').addEventListener('click', (e) => {
+    if (e.target === $('historyModal')) closeHistory();
+  });
+  $('historyFilter').addEventListener('input', renderHistory);
+  $('btnHistoryRescan').addEventListener('click', async () => {
+    await openHistory(true); // 忽略缓存重扫磁盘
+    await loadDownloadsIndex(true); // 「已下载」标记也跟着刷新
+    toast('已重新扫描下载目录', 'ok', 3000);
+  });
+  $('historyList').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-hopen]');
+    if (!btn) return;
+    const p = btn.getAttribute('data-hopen');
+    if (p) api.shell.openPath(p);
+    else toast('这条记录没有文件路径', 'warn', 4000);
   });
 
   // ---- 作品详情预览 ----

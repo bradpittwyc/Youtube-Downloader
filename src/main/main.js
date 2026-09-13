@@ -814,6 +814,12 @@ function registerIpc() {
           uploadDate: rec.uploadDate || '',
           viewCount: rec.viewCount == null ? null : rec.viewCount,
           duration: rec.duration == null ? null : rec.duration,
+          // 下面几个是给「下载历史」用的 —— 边车文件里本来就有，之前没透出来。
+          // 历史列表要显示频道名与下载时间，否则一屏都是标题、分不清是谁的。
+          channel: rec.channel || '',
+          url: rec.url || '',
+          at: rec.at || '',
+          file: rec.file || '',
         });
       }
       return { ok: true, list, dir: (opts && opts.dir) || settings.outputDir };
