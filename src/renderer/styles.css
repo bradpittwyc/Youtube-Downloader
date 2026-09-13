@@ -152,25 +152,7 @@ input::placeholder {
   font-size: 14px;
   line-height: 1.25;
 }
-/* 版本号：跟在标题下面，小一号、暗一点，不抢标题的视线。
-   有更新时由 app.js 加上 .has-update 变成高亮色。
-   行高要显式给 —— 继承 1.35 的话两行加起来比 logo(26px) 还高，看着会挤在一起。 */
-.brand-version {
-  font-size: 10.5px;
-  line-height: 1.25;
-  color: var(--text-dim);
-  font-variant-numeric: tabular-nums;
-  margin-top: 1px;
-  cursor: default;
-  white-space: nowrap;
-}
-.brand-version.has-update {
-  color: var(--ok);
-  cursor: pointer;
-}
-.brand-version.has-update::after {
-  content: ' · 有新版本';
-}
+/* 版本号显示在【窗口标题栏】上（main.js 里设 BrowserWindow 的 title），不放界面里 */
 .fetch-row {
   display: flex;
   gap: 8px;

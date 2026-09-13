@@ -1070,7 +1070,8 @@ function createWindow() {
     height: 880,
     minWidth: 1000,
     minHeight: 640,
-    title: 'YouTube 下载器',
+    // 窗口标题带上版本号，一眼能看到自己在跑哪一版
+    title: `YouTube 下载器 v${app.getVersion()}`,
     backgroundColor: '#0f1116',
     autoHideMenuBar: true,
     webPreferences: {
@@ -1081,6 +1082,11 @@ function createWindow() {
       spellcheck: false,
     },
   });
+
+  // ⚠️ Electron 默认会用页面里的 <title> 覆盖窗口标题。
+  // index.html 里的 <title> 是写死的「YouTube 下载器」（没有版本号），
+  // 不拦住的话上面那行 title 会被它盖掉、版本号就没了。
+  mainWindow.webContents.on('page-title-updated', (e) => e.preventDefault());
 
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
