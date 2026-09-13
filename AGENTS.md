@@ -211,9 +211,34 @@ git add -A; git commit -q --amend --no-edit     # 确认临时文件没被带进
 3. `npm run dist`（先关 App！）
 4. 提交 → `git tag -a vX.Y.Z -m "…"` → `git push`
    （已配置 `push.followTags=true`，推送时会带上 tag）
+5. **建 GitHub Release 并把两个 exe 挂上去**（见下）
 
-**构建产物不入库**。策略是「源码 + tag 在 GitHub，本地不留」，
-需要旧版本时从 tag 重建（约 2 分钟）。
+#### 第 5 步不能省：tag ≠ Release
+
+`git push` 只推了一个**标记**，仓库里不会出现任何可下载的文件。
+**Release 是另一个对象**，必须单独创建并附带产物 —— 曾经 54 个版本
+一个 Release 都没有，就是因为这一步从来没写进流程。
+
+```powershell
+# 从 CHANGELOG 抽出该版本的说明当 Release notes
+node tools/extract-notes.js vX.Y.Z "$env:TEMP\relnotes.md"
+
+gh release create vX.Y.Z `
+  "dist\YouTubeDownloader-Setup-X.Y.Z.exe" `
+  "dist\YouTubeDownloader-Portable-X.Y.Z.exe" `
+  --title "vX.Y.Z — 一句话标题" `
+  --notes-file "$env:TEMP\relnotes.md"
+
+# 核对附件真的挂上去了（务必看一眼，别只看命令返回的 URL）
+gh release view vX.Y.Z --json tagName,name,assets
+```
+
+**构建产物不入库** —— 指的是**不进 git 历史**（`dist/` 已 gitignore），
+而不是"不发布"。Release 附件存在 GitHub 的单独存储里，不会让仓库变臃肿，
+两者并不冲突：仓库保持干净，同时每个版本都有可直接下载的安装包。
+
+> 历史版本不必补：54 个 tag 逐个重建约 2 小时、占 15 GB，不划算。
+> 从当前版本起每个都发即可。
 
 ### 5.3 验证标准（作者的要求）
 

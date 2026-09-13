@@ -8,16 +8,22 @@
 
 ## 交付物
 
+**下载地址：<https://github.com/bradpittwyc/Youtube-Downloader/releases>**（每个版本都附了两个 exe）
+
 | 文件 | 说明 |
 |---|---|
-| `dist/YouTubeDownloader-Setup-<版本>.exe` | **安装版**（约 149 MB）。可选安装目录，自动创建开始菜单与桌面快捷方式，带标准卸载程序 |
-| `dist/YouTubeDownloader-Portable-<版本>.exe` | **免安装版**（约 149 MB）。双击直接运行，不写注册表 |
+| `YouTubeDownloader-Setup-<版本>.exe` | **安装版**（约 141 MB）。可选安装目录，自动创建开始菜单与桌面快捷方式，带标准卸载程序 |
+| `YouTubeDownloader-Portable-<版本>.exe` | **免安装版**（约 141 MB）。双击直接运行，不写注册表 |
 | `src/` | 全部源码 |
 | `tools/` | 测试与验证脚本 |
 | `CHANGELOG.md` | 每个版本的改动记录 |
 
-> 构建产物**不在版本库里归档**（`dist/`、`releases/` 都被 `.gitignore` 排除）。
-> 历史版本请从 git tag 重建，见下方「版本备份、回滚与重建」。
+> 构建产物**不进 git 历史**（`dist/`、`releases/` 都被 `.gitignore` 排除），
+> 但每个版本都会**发布到 GitHub Releases** —— 附件存在 GitHub 的单独存储里，
+> 不会让仓库变臃肿。所以「仓库干净」和「有可直接下载的安装包」两者兼得。
+>
+> v1.23.0 之前的版本**没有 Release**（当时流程里漏了这一步），
+> 需要旧版本时从 git tag 重建，见下方「版本备份、回滚与重建」。
 
 > 安装包体积主要来自 Electron 运行时（约 100 MB）与 `ffmpeg.exe`（96 MB）。这是"用户零依赖"的代价。
 
@@ -181,18 +187,26 @@ $env:YTDL_DEV_EXEC=1
 
 ## 版本备份、回滚与重建
 
-### 备份策略：源码 + tag 在 GitHub，本地不留构建产物
+### 备份策略：源码 + tag + Release 附件
 
 远程仓库：**https://github.com/bradpittwyc/Youtube-Downloader**（私有）
 
 每个版本都打了 git tag（`v1.0.0` 起，**以 `git tag -l` 的实际数量为准**），**全部已推送到远程**。
-`releases/`、`dist/`、`node_modules/` 都被 `.gitignore` 排除，**不会**上传 ——
-也就是说 **GitHub 上只有源码和 tag，没有构建好的 exe**。
+`releases/`、`dist/`、`node_modules/` 都被 `.gitignore` 排除，**不进 git 历史**。
 
-这是有意为之：最占体积的 `resources/bin/ffmpeg.exe`(96 MB) 本身在 git 里，
-所以重建任何版本都只是「装依赖 + 打包」，约 2 分钟。为此上传上百 MB 的 exe 不划算。
+**但构建产物会发布到 [GitHub Releases](https://github.com/bradpittwyc/Youtube-Downloader/releases)** ——
+从 **v1.23.0** 起每个版本都附上 Setup 与 Portable 两个 exe，双击就能下载，不必自己构建。
+
+> **为什么两者不冲突**：Release 附件存在 GitHub 的**单独存储**里，不占仓库体积、
+> 不进 git 历史。所以仓库保持干净，同时每个版本都有可直接下载的安装包。
+>
+> 这一条曾经漏掉过：早期 54 个版本只打了 tag、**一个 Release 都没有**，
+> 因为发版流程里压根没有这一步 —— 于是"备份策略"名义上有，
+> 实际上没有任何可下载的产物。现已补进流程（见下方第 5 步）。
 
 ### 重建任意版本
+
+v1.23.0 之前的版本没有 Release，需要自己构建：
 
 ```powershell
 $tag = 'v1.7.1'
@@ -205,6 +219,7 @@ git worktree remove ..\_rebuild
 ```
 
 想省事也可以直接在临时目录 `git clone -b v1.7.1 <repo> && npm install && npm run dist`。
+（实测：从零克隆 → `npm ci` → `npm run dist` 全程可用，产物与本机一致。）
 
 ### 回退源码
 
@@ -222,8 +237,16 @@ git add -A; git commit -F commit-msg.txt
 # 3. 打 tag（已配置 push.followTags=true，推送时会自动带上 tag）
 git tag -a v1.13.0 -m "v1.13.0 ..."
 git push
-# 4. 构建（产物留在 dist\，不必再归档到 releases\）
+# 4. 构建
 npm run dist
+# 5. 【不能省】建 Release 并挂上两个 exe —— tag ≠ Release，只推 tag 没有任何可下载的文件
+node tools\extract-notes.js v1.13.0 "$env:TEMP\relnotes.md"
+gh release create v1.13.0 `
+  "dist\YouTubeDownloader-Setup-1.13.0.exe" `
+  "dist\YouTubeDownloader-Portable-1.13.0.exe" `
+  --title "v1.13.0 — 一句话标题" `
+  --notes-file "$env:TEMP\relnotes.md"
+gh release view v1.13.0 --json tagName,name,assets    # 务必核对附件真的挂上去了
 ```
 
 > **注意 1（构建前先关掉 App）**：程序在运行时构建会报
