@@ -21,6 +21,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { Readable } = require('stream');
 const { spawn } = require('child_process');
 
 const REPO = 'bradpittwyc/Youtube-Downloader';
@@ -113,8 +114,7 @@ async function checkForUpdate(currentVersion) {
 
 /** 下载安装包到临时目录，边下边报进度、下完校验 sha256 */
 async function downloadUpdate(asset, destPath, onProgress) {
-  const ctrl = new AbortController();
-  const res = await fetch(asset.url, { signal: ctrl.signal, redirect: 'follow' });
+  const res = await fetch(asset.url, { redirect: 'follow' });
   if (!res.ok) throw new Error(`下载失败 HTTP ${res.status}`);
 
   const total = Number(res.headers.get('content-length')) || asset.size || 0;
@@ -122,11 +122,16 @@ async function downloadUpdate(asset, destPath, onProgress) {
   let received = 0;
   let lastTick = 0;
 
+  // ⚠️ fetch 返回的 res.body 是 WHATWG ReadableStream，**没有 .on('data')** ——
+  // 必须先用 Readable.fromWeb 转成 Node 流。直接当 Node 流用会静默失败，
+  // 表现是「下载立刻返回 ok:false」，非常难查（这个 bug 就是端到端测试抓出来的）。
+  const src = Readable.fromWeb(res.body);
+
   await new Promise((resolve, reject) => {
     const out = fs.createWriteStream(destPath);
     out.on('error', reject);
-    res.body.on('error', reject);
-    res.body.on('data', (chunk) => {
+    src.on('error', reject);
+    src.on('data', (chunk) => {
       received += chunk.length;
       hash.update(chunk);
       out.write(chunk);
@@ -136,14 +141,20 @@ async function downloadUpdate(asset, destPath, onProgress) {
         onProgress({ received, total, percent: total ? received / total : 0 });
       }
     });
-    res.body.on('end', () => {
+    src.on('end', () => {
       out.end(() => {
         if (onProgress) onProgress({ received, total, percent: 1 });
         resolve();
       });
     });
-    res.body.on('aborted', () => reject(new Error('下载中断')));
   });
+
+  if (total && received !== total) {
+    try {
+      fs.unlinkSync(destPath);
+    } catch (_) {}
+    throw new Error(`下载不完整（收到 ${received} / 应为 ${total} 字节），已删除，请重试`);
+  }
 
   const actual = hash.digest('hex');
   if (asset.sha256 && actual.toLowerCase() !== asset.sha256.toLowerCase()) {
