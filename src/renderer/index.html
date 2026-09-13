@@ -32,6 +32,10 @@
       </div>
 
       <div class="topbar-right">
+        <!-- 有新版本时才出现，平时完全隐藏 -->
+        <button id="btnUpdateBadge" class="btn tiny update-badge hidden" title="发现新版本，点击查看">
+          有新版本
+        </button>
         <button id="btnQueueJump" class="btn ghost" title="跳到下载队列">队列 <span id="queueBadge">0</span></button>
         <button id="btnSettings" class="btn ghost" title="设置">⚙ 设置</button>
       </div>
@@ -581,6 +585,21 @@
             </div>
             <pre id="updateLog" class="update-log hidden"></pre>
           </div>
+
+          <div class="setting-row">
+            <label>软件更新</label>
+            <div class="inline">
+              <span class="muted">当前版本 <b id="appVersion">—</b></span>
+              <button id="btnCheckUpdate" class="btn tiny">检查更新</button>
+              <button id="btnOpenRelease" class="btn tiny">打开发布页</button>
+              <span id="updateStatus" class="muted"></span>
+            </div>
+            <small class="muted"
+              >安装包来自本项目的 GitHub Releases。发现新版本后会提示你，点一下即可自动下载、
+              静默安装并重启（现有安装位于受保护目录，中途会有一次系统授权提示，点「是」即可）。
+              启动时也会自动检查一次。</small
+            >
+          </div>
         </div>
 
         <div class="modal-foot">
@@ -615,6 +634,37 @@
           <span id="hPageInfo" class="q-page-info"></span>
           <button id="hPagePrev" class="btn tiny" title="上一页">‹</button>
           <button id="hPageNext" class="btn tiny" title="下一页">›</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 软件更新 ============
+         安装包来自本仓库的 GitHub Releases（仓库必须公开，私有仓库匿名读不到）。
+         点「下载并安装」后会：下载 → 校验 sha256 → 静默升级 → 自动重启。
+         现有安装是 per-machine 的，所以中途会弹一次 UAC 授权，允许即可。 -->
+    <div id="updateModal" class="modal hidden">
+      <div class="modal-card update-card">
+        <div class="modal-head">
+          <h3 id="updateTitle">发现新版本</h3>
+          <button id="btnCloseUpdate" class="btn ghost">✕</button>
+        </div>
+        <div class="update-body">
+          <div class="update-versions">
+            <span>当前版本 <b id="updateFrom">—</b></span>
+            <span class="update-arrow">→</span>
+            <span>最新版本 <b id="updateTo" class="update-new">—</b></span>
+          </div>
+          <div id="updateNotes" class="update-notes"></div>
+          <div id="updateProgress" class="update-progress hidden">
+            <div class="update-bar"><i></i></div>
+            <span id="updateProgressText" class="muted"></span>
+          </div>
+          <div id="updateHint" class="update-hint hidden"></div>
+        </div>
+        <div class="modal-foot update-foot">
+          <button id="btnUpdatePage" class="btn ghost">打开发布页</button>
+          <button id="btnUpdateSkip" class="btn ghost">暂不更新</button>
+          <button id="btnUpdateGo" class="btn primary">下载并安装</button>
         </div>
       </div>
     </div>

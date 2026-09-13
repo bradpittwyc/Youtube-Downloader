@@ -56,6 +56,15 @@ contextBridge.exposeInMainWorld('api', {
     onState: (cb) => on('power:state', cb),
   },
 
+  update: {
+    check: () => ipcRenderer.invoke('update:check'),
+    download: (asset) => ipcRenderer.invoke('update:download', asset),
+    apply: (installerPath) => ipcRenderer.invoke('update:apply', installerPath),
+    openPage: () => ipcRenderer.invoke('update:open-page'),
+    onProgress: (cb) => on('update:progress', cb),
+    onAvailable: (cb) => on('update:available', cb),
+  },
+
   dialog: {
     pickFolder: (current) => ipcRenderer.invoke('dialog:pickFolder', current),
     pickFile: () => ipcRenderer.invoke('dialog:pickFile'),

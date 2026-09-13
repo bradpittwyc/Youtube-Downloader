@@ -1450,6 +1450,10 @@ async function loadSettingsToForm() {
   $('setStudyBase').value = s.studyBaseURL || '';
   $('setStudyModel').value = s.studyModel || '';
   applyModelNote(null); // 打开设置时就把模型说明与单价同步好
+  // 打开设置就把当前版本显示出来（点「检查更新」时还会再填一次）
+  api.info().then((i) => {
+    if (i && i.version && $('appVersion')) $('appVersion').textContent = 'v' + i.version;
+  });
   $('setStudyConcurrency').value = s.studyConcurrency || 3;
   $('setStudyMaxSeg').value = s.studyMaxSegCues || 45;
   $('setStudyPriceIn').value = s.studyPriceIn != null ? s.studyPriceIn : 2;
@@ -1559,6 +1563,84 @@ async function fetchModelList() {
     note.textContent = '❌ 拉取失败：' + e.message + '（可直接手填模型名）';
   } finally {
     btn.disabled = false;
+  }
+}
+
+/* ==================== 软件更新 ==================== */
+
+/**
+ * 更新流程：检查 → 下载（带进度、校验 sha256）→ 静默升级 → 自动重启。
+ * 安装包来自本仓库的 GitHub Releases（仓库必须公开，私有仓库匿名读不到 → 404）。
+ *
+ * ⚠️ 升级会弹一次 UAC：现有安装是 per-machine 的（D:\Program Files + /allusers），
+ * 替换文件需要管理员权限。界面上要提前说清楚，否则用户会以为卡住了。
+ */
+let pendingUpdate = null;
+
+function showUpdateModal(info) {
+  pendingUpdate = info;
+  $('updateTitle').textContent = '发现新版本';
+  $('updateFrom').textContent = 'v' + info.current;
+  $('updateTo').textContent = 'v' + info.latest;
+  $('updateNotes').textContent = String(info.notes || '(这个版本没有写更新说明)').trim();
+  $('updateProgress').classList.add('hidden');
+  $('updateHint').classList.add('hidden');
+  $('btnUpdateGo').disabled = false;
+  $('btnUpdateGo').textContent = info.asset ? '下载并安装' : '打开发布页';
+  $('updateModal').classList.remove('hidden');
+}
+
+function closeUpdateModal() {
+  $('updateModal').classList.add('hidden');
+}
+
+async function runUpdate() {
+  const info = pendingUpdate;
+  if (!info) return;
+  const go = $('btnUpdateGo');
+  const hint = $('updateHint');
+
+  // 没有可下载的附件（release 还没传 exe）→ 只能引导去发布页
+  if (!info.asset) {
+    api.update.openPage();
+    return;
+  }
+
+  go.disabled = true;
+  go.textContent = '下载中…';
+  hint.classList.remove('hidden');
+  hint.textContent =
+    '正在下载安装包，完成后会自动静默安装并重启。\n' +
+    '现有安装位于受保护目录，中途会弹出一次系统授权（UAC），点「是」即可 —— 之后无需任何操作。';
+
+  const un = api.update.onProgress((p) => {
+    const pct = Math.round((p.percent || 0) * 100);
+    $('updateProgress').classList.remove('hidden');
+    $('updateProgress').querySelector('i').style.width = pct + '%';
+    $('updateProgressText').textContent =
+      `${pct}%　${fmtBytes(p.received)}${p.total ? ' / ' + fmtBytes(p.total) : ''}`;
+  });
+
+  try {
+    const r = await api.update.download(info.asset);
+    if (!r || !r.ok) {
+      go.disabled = false;
+      go.textContent = '重试下载';
+      hint.textContent = '下载失败：' + ((r && r.error) || '未知错误') + '\n可以点「打开发布页」手动下载。';
+      return;
+    }
+    $('updateProgressText').textContent =
+      `${fmtBytes(r.bytes)} 下载完成` + (r.verified ? '，sha256 校验通过' : '');
+    go.textContent = '正在安装…';
+    hint.textContent = '安装包已就绪，App 即将退出并自动升级，装好后会自己重新打开。';
+    await new Promise((res) => setTimeout(res, 800));
+    await api.update.apply(r.path); // 主进程会启动安装并退出 App
+  } catch (e) {
+    go.disabled = false;
+    go.textContent = '重试下载';
+    hint.textContent = '出错了：' + e.message;
+  } finally {
+    if (typeof un === 'function') un();
   }
 }
 
@@ -1763,7 +1845,53 @@ function bind() {
 
   // 学习文档：测试连接 / 清除 Key
   $('btnFetchModels').addEventListener('click', fetchModelList);
-  // 改模型名时同步提示与单价（费用预估要跟着模型走，否则换模型后预估是错的）
+
+  // ---- 软件更新 ----
+  $('btnUpdateBadge').addEventListener('click', () => {
+    if (pendingUpdate) showUpdateModal(pendingUpdate);
+  });
+  $('btnCloseUpdate').addEventListener('click', closeUpdateModal);
+  $('btnUpdateSkip').addEventListener('click', closeUpdateModal);
+  $('updateModal').addEventListener('click', (e) => {
+    if (e.target === $('updateModal')) closeUpdateModal();
+  });
+  $('btnUpdateGo').addEventListener('click', runUpdate);
+  $('btnUpdatePage').addEventListener('click', () => api.update.openPage());
+  $('btnOpenRelease').addEventListener('click', () => api.update.openPage());
+
+  $('btnCheckUpdate').addEventListener('click', async () => {
+    const st = $('updateStatus');
+    st.textContent = '检查中…';
+    st.style.color = 'var(--text-faint)';
+    const r = await api.update.check();
+    if (!r.ok) {
+      st.textContent = '检查失败：' + r.error;
+      st.style.color = 'var(--err)';
+      return;
+    }
+    $('appVersion').textContent = 'v' + r.current;
+    if (r.hasUpdate) {
+      st.textContent = `发现新版本 v${r.latest}`;
+      st.style.color = 'var(--ok)';
+      $('btnUpdateBadge').classList.remove('hidden');
+      showUpdateModal(r);
+    } else {
+      st.textContent = '已是最新版本';
+      st.style.color = 'var(--ok)';
+    }
+  });
+
+  // 主进程在启动后 8 秒静默检查一次；发现新版就推过来
+  api.update.onAvailable((info) => {
+    pendingUpdate = info;
+    $('btnUpdateBadge').classList.remove('hidden');
+    const st = $('updateStatus');
+    if (st) {
+      st.textContent = `发现新版本 v${info.latest}`;
+      st.style.color = 'var(--ok)';
+    }
+    // 不直接弹窗打断 —— 顶栏闪一个徽标，用户点了再看
+  });  // 改模型名时同步提示与单价（费用预估要跟着模型走，否则换模型后预估是错的）
   $('setStudyModel').addEventListener('input', () => applyModelNote(null));
 
   $('btnTestLLM').addEventListener('click', async () => {

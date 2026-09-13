@@ -1322,6 +1322,93 @@ input::placeholder {
   gap: 14px;
 }
 
+/* ================= 软件更新 ================= */
+.update-badge {
+  background: var(--info, #2f6feb);
+  color: #fff;
+  border-color: transparent;
+  animation: updatePulse 1.8s ease-in-out infinite;
+}
+@keyframes updatePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.62; }
+}
+.update-card {
+  width: 640px;
+}
+.update-body {
+  padding: 16px 18px;
+  overflow-y: auto;
+  max-height: 62vh;
+}
+.update-versions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13.5px;
+  margin-bottom: 14px;
+}
+.update-versions b {
+  font-variant-numeric: tabular-nums;
+}
+.update-new {
+  color: var(--ok);
+}
+.update-arrow {
+  color: var(--text-faint);
+}
+/* Release 说明是 Markdown，这里只做等宽纯文本展示 —— 引 markdown 库不值当 */
+.update-notes {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12.5px;
+  line-height: 1.85;
+  color: var(--text-dim);
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 12px 14px;
+  max-height: 34vh;
+  overflow-y: auto;
+}
+.update-progress {
+  margin-top: 14px;
+}
+.update-bar {
+  height: 8px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.update-bar > i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  background: var(--info, #2f6feb);
+  transition: width 0.2s ease;
+}
+.update-progress span {
+  display: block;
+  margin-top: 6px;
+  font-size: 11.5px;
+}
+.update-hint {
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--text-dim);
+  background: rgba(47, 111, 235, 0.1);
+  border: 1px solid rgba(47, 111, 235, 0.35);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.update-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* ================= 下载历史 ================= */
 .history-card {
   width: 720px;

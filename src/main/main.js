@@ -5,6 +5,7 @@
 const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 const crypto = require('crypto');
 const https = require('https');
 
@@ -19,6 +20,7 @@ const channelsStore = require('./channels-store');
 const categories = require('./categories');
 const netdiag = require('./netdiag');
 const power = require('./power');
+const updater = require('./updater');
 const downloadsIndex = require('./downloads-index');
 const { authArgs, detectBrowsers, authSummary, explainCookieError } = require('./ytdlp-auth');
 const queueMod = require('./queue');
@@ -924,6 +926,42 @@ function registerIpc() {
     return { ok: true, items: queue.snapshot(), stats: queue.stats() };
   });
 
+  // ---- 自动升级 ----
+  //
+  // 安装包来自本仓库的 GitHub Releases（仓库必须是公开的，私有仓库匿名读不到 → 404）。
+  // 实测：Setup 安装包支持 `/S` 静默原地升级，但 `/S` 不触发 runAfterFinish，
+  // 所以装完由 updater 用一段临时 .cmd 负责把 App 重新拉起来。
+  ipcMain.handle('update:check', async () => updater.checkForUpdate(app.getVersion()));
+
+  ipcMain.handle('update:download', async (_e, asset) => {
+    if (!asset || !asset.url) return { ok: false, error: '没有可下载的安装包' };
+    const dest = path.join(os.tmpdir(), asset.name || 'ytdl-update.exe');
+    try {
+      const r = await updater.downloadUpdate(asset, dest, (p) => {
+        sendToRenderer('update:progress', p);
+      });
+      return { ok: true, path: r.path, bytes: r.bytes, verified: r.verified };
+    } catch (err) {
+      return { ok: false, error: String((err && err.message) || err) };
+    }
+  });
+
+  ipcMain.handle('update:apply', (_e, installerPath) => {
+    if (!installerPath || !fs.existsSync(installerPath)) {
+      return { ok: false, error: '安装包不存在，请重新下载' };
+    }
+    // 重启的是「当前正在运行的这个 exe」—— 安装是原地升级，路径不变
+    updater.applyUpdateAndRestart(installerPath, process.execPath);
+    // 给一点时间让上面的批处理落盘，然后退出；批处理会等 2 秒再开始装
+    setTimeout(() => app.quit(), 400);
+    return { ok: true };
+  });
+
+  ipcMain.handle('update:open-page', () => {
+    shell.openExternal(updater.RELEASES_PAGE);
+    return true;
+  });
+
   // ---- 系统 ----
   ipcMain.handle('shell:open-path', async (_e, p) => {
     if (!p) return false;
@@ -1063,6 +1101,28 @@ function createWindow() {
   });
   mainWindow.webContents.on('did-finish-load', () => {
     console.log('[renderer] did-finish-load');
+  });
+
+  // 启动后静默检查一次更新。
+  // 延迟 8 秒：不跟启动时的频道索引、字体枚举抢网络和 CPU；
+  // 检查失败（断网、被墙、接口抽风）只写日志，绝不打扰用户 ——
+  // 用户还能在设置里手动点「检查更新」。
+  mainWindow.webContents.once('did-finish-load', () => {
+    setTimeout(async () => {
+      try {
+        const r = await updater.checkForUpdate(app.getVersion());
+        if (r.ok && r.hasUpdate) {
+          console.log(`[update] 发现新版本 ${r.latest}（当前 ${r.current}）`);
+          sendToRenderer('update:available', r);
+        } else if (r.ok) {
+          console.log(`[update] 已是最新版本 ${r.current}`);
+        } else {
+          console.log('[update] 检查失败：' + r.error);
+        }
+      } catch (e) {
+        console.log('[update] 检查异常：' + e.message);
+      }
+    }, 8000);
   });
 
   // 开发辅助（打包后默认失效，除非显式设置环境变量 YTDL_DEV_EXEC=1，用于发布前验证）：
