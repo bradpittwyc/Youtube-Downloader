@@ -18,7 +18,7 @@ Windows 桌面版 YouTube 批量下载器（Electron）。核心链路：
 ```
 
 - **作者的使用场景**：把 YouTube 视频变成可用于英语学习的语料
-- **仓库**：`https://github.com/bradpittwyc/Youtube-Downloader`（私有）
+- **仓库**：`https://github.com/bradpittwyc/Youtube-Downloader`（**公开** —— 内置的自动升级要靠匿名读它的 Releases，别改回私有，见第 7 节）
 - **当前版本**：见 `package.json`；`git tag` 有全部历史版本
 - **技术栈**：Electron 44 + electron-builder；无前端框架，原生 DOM
 - **运行时依赖极少**：只有 `docx`（生成 Word）。**不要轻易引入新依赖**，作者明确不喜欢臃肿
@@ -275,6 +275,7 @@ HTTP 500 / 502 / 空响应**，`gh` 报 `unexpected end of JSON input`。
 | `src/main/channel.js` | 频道识别、播放列表展开、视频详情 |
 | `src/main/settings.js` | 设置默认值与迁移 |
 | `src/main/downloads-index.js` | 按视频 ID 识别本地已下载（边车文件） |
+| `src/main/updater.js` | 自动升级：查 Releases → 下载 + sha256 校验 → 静默安装 → 自动重启 |
 | `src/main/ytdlp-auth.js` | Cookies / 代理参数（**所有 yt-dlp 调用共用**） |
 | `src/main/study/` | 学习文档流水线：字幕解析 → LLM 翻译 → Word / ASS / 金句卡片 |
 | `src/renderer/app.js` | 全部界面逻辑（IIFE，**不要写 `const api = window.api`**） |
@@ -283,6 +284,9 @@ HTTP 500 / 502 / 空响应**，`gh` 报 `unexpected end of JSON input`。
 
 ## 7. 不要做的事
 
+- **不要把仓库改回私有** —— 内置的自动升级要靠**匿名**读本仓库的 GitHub Releases。
+  私有仓库的 Release 匿名访问返回 **404**，updater 会直接失效（实测过）。
+  如果确实必须私有，得给 updater 换成「在设置里填 PAT」的方案。
 - **不要引入新依赖**（尤其前端框架、图像库）——渲染大图用 Electron 自带的 `capturePage`，图标用 `tools/make-icon.js`
 - **不要给 `yt-dlp` 加 `--download-archive`**（历史上导致过两个 bug，已移除）
 - **不要把 cookie/代理只加在下载那一步**——识别、字幕、探测全都要（见 `ytdlp-auth.js`）

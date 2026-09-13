@@ -110,6 +110,9 @@ Word 文档包含：
 
 - 内置 yt-dlp.exe + ffmpeg.exe，用户零依赖
 - 内核一键更新（下载到用户目录，无需管理员权限），可恢复内置版本
+- **自动升级**：启动后自动检查新版本，点一下即下载、静默安装并重启
+  （安装包来自本项目的 GitHub Releases，下载后校验 sha256；
+  因安装目录受保护，中途会有一次系统授权提示）
 - 默认下载目录 `F:\YouTube下载`，并有「F → 其他非 C 盘 → 系统视频目录」降级链与盘符自愈
 - NSIS 安装包 + 免安装版
 
@@ -189,7 +192,7 @@ $env:YTDL_DEV_EXEC=1
 
 ### 备份策略：源码 + tag + Release 附件
 
-远程仓库：**https://github.com/bradpittwyc/Youtube-Downloader**（私有）
+远程仓库：**https://github.com/bradpittwyc/Youtube-Downloader**（公开）
 
 每个版本都打了 git tag（`v1.0.0` 起，**以 `git tag -l` 的实际数量为准**），**全部已推送到远程**。
 `releases/`、`dist/`、`node_modules/` 都被 `.gitignore` 排除，**不进 git 历史**。
