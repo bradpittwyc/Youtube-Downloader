@@ -80,21 +80,152 @@ function escAss(text) {
     .trim();
 }
 
-/** 英文按单词折行，避免切断单词 */
-function wrapEnglish(text, maxChars) {
-  const words = String(text).split(/\s+/).filter(Boolean);
+/**
+ * 中文排版的「避头尾」禁则。
+ *
+ * 避头点：不能出现在【行首】。断在它前面就会变成「上一行塞满、下一行只有一个句号」，
+ *   实测最丑的一种断法就是 `motility（肠道动力）和 pollinators（传粉者）\N。`
+ * 避尾点：不能出现在【行尾】（开引号、开括号后面不该断）。
+ */
+const NO_LINE_START = '，。、；：？！）〕】》」』…—～·,.;:?!)]}»';
+const NO_LINE_END = '（〔【《「『([{«';
+
+/**
+ * 把文本切成「不可再分的单元」，每个单元带自己的显示宽度。
+ *  · 英文模式：一个单词一个单元（绝不从单词中间断开）
+ *  · 中文模式：一个字一个单元，但连续的拉丁字母/数字整体算一个单元
+ *    ——否则 "Huberman Lab Essentials" 会被逐字母切开（实测踩过）
+ */
+function splitUnits(text, mode) {
+  const s = String(text);
+  const units = [];
+  if (mode === 'en') {
+    // ⚠️ 每个词的宽度必须【带上它前面那个空格】。
+    // 否则动态规划只用「单词宽度之和」判断是否超行 —— 空格全被漏算，
+    // 实测会把实际宽 24.5 的一行（上限 22）判定成 20.5 塞进一行，直接溢出。
+    // 拼回去时用空格 join，正好与这里的计入方式对上。
+    const words = s.split(/\s+/).filter(Boolean);
+    words.forEach((w, i) => units.push({ text: w, w: displayWidth(w) + (i ? 0.5 : 0) }));
+  } else {
+    let buf = '';
+    const flush = () => {
+      if (buf) {
+        units.push({ text: buf, w: displayWidth(buf) });
+        buf = '';
+      }
+    };
+    for (const ch of s) {
+      if (/[A-Za-z0-9]/.test(ch)) buf += ch;
+      else {
+        flush();
+        units.push({ text: ch, w: displayWidth(ch) });
+      }
+    }
+    flush();
+  }
+  return units;
+}
+
+/** 贪心折行：只在动态规划解不出来时兜底（例如单个词就比整行还宽） */
+function wrapGreedy(units, maxUnits, mode) {
+  const joiner = mode === 'en' ? ' ' : '';
   const lines = [];
-  let cur = '';
-  for (const w of words) {
-    if (!cur.length) cur = w;
-    else if ((cur + ' ' + w).length <= maxChars) cur += ' ' + w;
-    else {
-      lines.push(cur);
-      cur = w;
+  let cur = [];
+  let w = 0;
+  for (const u of units) {
+    if (cur.length && w + u.w > maxUnits) {
+      lines.push(cur.map((x) => x.text).join(joiner).trim());
+      cur = [];
+      w = 0;
+    }
+    cur.push(u);
+    w += u.w;
+  }
+  if (cur.length) lines.push(cur.map((x) => x.text).join(joiner).trim());
+  const out = lines.filter((l) => l.length);
+  return out.length ? out : [''];
+}
+
+/**
+ * 均衡折行（minimum-raggedness）+ 中文避头尾禁则。
+ *
+ * 【为什么不用贪心】贪心是「填到满为止」，必然产生两种难看的结果：
+ *   · 上一行塞得满满、下一行只剩一两个字（实测中文 19 处、英文 30 处）
+ *   · 两行长度差 3 倍以上（实测 78 处）
+ * 最小参差折行反过来求「各行长度尽量接近」，天然消除孤字行。
+ *
+ * 代价函数：Σ(行内剩余空间)² + 违禁罚分。
+ * 总剩余空间 = 行数 × 上限 − 总宽度，是个定值；而「和固定时平方和最小」
+ * 正好发生在各行剩余相等的时候 —— 所以这个代价函数给出的就是最均衡的切法。
+ *
+ * @param {string} text
+ * @param {number} maxUnits 每行最多多少「显示宽度单位」（1 个汉字 = 1，1 个拉丁字母 = 0.5）
+ * @param {'en'|'zh'} mode
+ */
+function wrapBalanced(text, maxUnits, mode) {
+  const s = String(text).trim();
+  if (!s) return [''];
+  if (displayWidth(s) <= maxUnits) return [s];
+
+  const units = splitUnits(s, mode);
+  const n = units.length;
+  if (!n) return [''];
+  if (n === 1) return [units[0].text];
+
+  const cum = new Array(n + 1).fill(0);
+  for (let i = 0; i < n; i++) cum[i + 1] = cum[i] + units[i].w;
+
+  const INF = Number.POSITIVE_INFINITY;
+  const cost = new Array(n + 1).fill(INF);
+  const cut = new Array(n + 1).fill(-1);
+  cost[0] = 0;
+
+  for (let j = 1; j <= n; j++) {
+    for (let i = j - 1; i >= 0; i--) {
+      const w = cum[j] - cum[i];
+      if (w > maxUnits + 0.01) break; // 再往前只会更宽
+      if (cost[i] === INF) continue;
+      let pen = 0;
+      // 这一行的最后一个字符不能是避尾点
+      const tail = units[j - 1].text;
+      if (NO_LINE_END.includes(tail[tail.length - 1])) pen += 1e6;
+      // 下一行的第一个字符不能是避头点
+      if (j < n && NO_LINE_START.includes(units[j].text[0])) pen += 1e6;
+      const slack = maxUnits - w;
+      const c = cost[i] + slack * slack + pen;
+      if (c < cost[j]) {
+        cost[j] = c;
+        cut[j] = i;
+      }
     }
   }
-  if (cur) lines.push(cur);
-  return lines.length ? lines : [''];
+
+  if (cost[n] === INF) return wrapGreedy(units, maxUnits, mode);
+
+  // 英文单元之间要补回空格（splitUnits 把空格去掉了）；
+  // 中文单元是逐字的，直接拼。用 join('') 会把 "who's like" 变成 "who'slike"。
+  const joiner = mode === 'en' ? ' ' : '';
+  const raw = [];
+  for (let j = n; j > 0; ) {
+    const i = cut[j];
+    if (i < 0) return wrapGreedy(units, maxUnits, mode);
+    raw.unshift(units.slice(i, j).map((u) => u.text).join(joiner).trim());
+    j = i;
+  }
+  return raw.filter((l) => l.length).length ? raw.filter((l) => l.length) : [''];
+}
+
+/** 英文折行。maxChars 是【字符数】，而 1 个拉丁字符 ≈ 0.5 个显示宽度单位 */
+function wrapEnglish(text, maxChars) {
+  return wrapBalanced(text, Math.max(4, Number(maxChars) * 0.5), 'en');
+}
+
+/**
+ * 中文行的折行。按【显示宽度】算，不能按字符个数 ——
+ * 一个拉丁字母的宽度约为一个汉字的 0.5 倍。
+ */
+function wrapChinese(text, maxUnits) {
+  return wrapBalanced(text, Math.max(3, Number(maxUnits)), 'zh');
 }
 
 /**
@@ -122,50 +253,6 @@ function displayWidth(s) {
   let w = 0;
   for (const ch of String(s)) w += isWide(ch) ? 1 : 0.5;
   return w;
-}
-
-const BREAK_AFTER = /[，。、；：？！,.;:?!…—”』」）)]/;
-
-function wrapChinese(text, maxUnits) {
-  const s = String(text).trim();
-  if (!s) return [''];
-  if (displayWidth(s) <= maxUnits) return [s];
-
-  const lines = [];
-  let cur = '';
-  let w = 0;
-  const push = () => {
-    const t = cur.trim();
-    if (t) lines.push(t);
-    cur = '';
-    w = 0;
-  };
-
-  for (const ch of s) {
-    const cw = isWide(ch) ? 1 : 0.5;
-    if (w + cw > maxUnits && cur) {
-      // 不要在英文单词中间断开：往回退到最近的空格，把半个单词带到下一行
-      const latinPair = /[A-Za-z0-9]/.test(ch) && /[A-Za-z0-9]$/.test(cur);
-      if (latinPair) {
-        const sp = cur.lastIndexOf(' ');
-        if (sp > 0) {
-          const carry = cur.slice(sp + 1).trim();
-          cur = cur.slice(0, sp);
-          push();
-          cur = carry;
-          w = displayWidth(carry);
-        }
-      }
-      if (w + cw > maxUnits) push();
-    }
-    cur += ch;
-    w += cw;
-    // 只要接近行宽上限又刚好遇到标点，就优先在这里断——比硬按宽度断更自然，
-    // 能避免出现「最可操 / 作的」这种把词拆开的断法。
-    if (w >= maxUnits - 6 && BREAK_AFTER.test(ch)) push();
-  }
-  push();
-  return lines.length ? lines : [''];
 }
 
 /**
@@ -307,4 +394,16 @@ function buildAss(o) {
   return head.concat(events, ['']).join('\r\n');
 }
 
-module.exports = { buildAss, toAssColor, fmtAssTime, escAss, BASE, BASE_RES_Y };
+// wrapEnglish / wrapChinese / displayWidth 导出是为了让测试能直接验证折行质量
+// （孤字行、避头尾、是否超宽），不必绕道去解析生成出来的 ASS。
+module.exports = {
+  buildAss,
+  toAssColor,
+  fmtAssTime,
+  escAss,
+  BASE,
+  BASE_RES_Y,
+  wrapEnglish,
+  wrapChinese,
+  displayWidth,
+};
