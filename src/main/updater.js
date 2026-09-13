@@ -58,7 +58,11 @@ async function fetchJson(url, timeoutMs = 20000) {
       headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'YouTubeDownloader-Updater' },
       signal: ctrl.signal,
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) {
+      const e = new Error(`HTTP ${res.status}`);
+      e.status = res.status;
+      throw e;
+    }
     return await res.json();
   } finally {
     clearTimeout(timer);
@@ -67,49 +71,70 @@ async function fetchJson(url, timeoutMs = 20000) {
 
 /**
  * 检查有没有新版本。
+ *
+ * 【为什么要重试】实测遇到过一次 HTTP 403：同一时刻 curl 和 Node 直连都是 200
+ * （限流 59/60 没超），只有 App 那次请求被拒。也就是**偶发**。
+ * 对「启动时检查一次」的场景来说，偶发失败就等于这个版本用户永远收不到更新，
+ * 所以必须退避重试几次。403/5xx/超时都重试，404（仓库私有/不存在）不重试 ——
+ * 那种情况重试多少次都一样。
+ *
  * @returns {Promise<object>} 永远不抛错 —— 网络问题只返回 {ok:false,error}
  */
-async function checkForUpdate(currentVersion) {
-  try {
-    const rel = await fetchJson(API_LATEST);
-    const latest = String(rel.tag_name || '').replace(/^v/i, '');
-    if (!latest) return { ok: false, error: 'release 里没有版本号' };
+async function checkForUpdate(currentVersion, opts = {}) {
+  const attempts = opts.attempts || 3;
+  let last = null;
 
-    const assets = Array.isArray(rel.assets) ? rel.assets : [];
-    // 优先 Setup（能原地升级），没有就退而求其次用 Portable
-    const setup = assets.find((a) => /Setup-[\d.]+\.exe$/i.test(a.name));
-    const portable = assets.find((a) => /Portable-[\d.]+\.exe$/i.test(a.name));
-    const asset = setup || portable || null;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const rel = await fetchJson(API_LATEST);
+      const latest = String(rel.tag_name || '').replace(/^v/i, '');
+      if (!latest) return { ok: false, error: 'release 里没有版本号' };
 
-    return {
-      ok: true,
-      current: currentVersion,
-      latest,
-      hasUpdate: isNewer(latest, currentVersion),
-      title: rel.name || rel.tag_name || '',
-      notes: rel.body || '',
-      publishedAt: rel.published_at || '',
-      pageUrl: rel.html_url || RELEASES_PAGE,
-      asset: asset
-        ? {
-            name: asset.name,
-            url: asset.browser_download_url,
-            size: asset.size || 0,
-            // GitHub 现在直接给 sha256；拿不到就跳过校验
-            sha256: /^sha256:/i.test(asset.digest || '') ? asset.digest.slice(7) : '',
-            isSetup: !!setup,
-          }
-        : null,
-    };
-  } catch (e) {
-    const msg = String((e && e.message) || e);
-    return {
-      ok: false,
-      error: /404/.test(msg)
-        ? '读不到 Release（仓库若为私有，匿名访问会返回 404）'
-        : msg,
-    };
+      const assets = Array.isArray(rel.assets) ? rel.assets : [];
+      // 优先 Setup（能原地升级），没有就退而求其次用 Portable
+      const setup = assets.find((a) => /Setup-[\d.]+\.exe$/i.test(a.name));
+      const portable = assets.find((a) => /Portable-[\d.]+\.exe$/i.test(a.name));
+      const asset = setup || portable || null;
+
+      return {
+        ok: true,
+        current: currentVersion,
+        latest,
+        hasUpdate: isNewer(latest, currentVersion),
+        title: rel.name || rel.tag_name || '',
+        notes: rel.body || '',
+        publishedAt: rel.published_at || '',
+        pageUrl: rel.html_url || RELEASES_PAGE,
+        asset: asset
+          ? {
+              name: asset.name,
+              url: asset.browser_download_url,
+              size: asset.size || 0,
+              // GitHub 现在直接给 sha256；拿不到就跳过校验
+              sha256: /^sha256:/i.test(asset.digest || '') ? asset.digest.slice(7) : '',
+              isSetup: !!setup,
+            }
+          : null,
+      };
+    } catch (e) {
+      last = e;
+      const status = e && e.status;
+      // 404 = 仓库不存在或私有了，重试没意义
+      if (status === 404) break;
+      if (i < attempts - 1) await new Promise((r) => setTimeout(r, 1200 * (i + 1)));
+    }
   }
+
+  const msg = String((last && last.message) || last || '未知错误');
+  const status = last && last.status;
+  return {
+    ok: false,
+    error:
+      status === 404
+        ? '读不到 Release（仓库若为私有，匿名访问会返回 404）'
+        : `检查更新失败（${msg}）—— 网络或 GitHub 接口的偶发问题，稍后可手动重试`,
+    attempts,
+  };
 }
 
 /** 下载安装包到临时目录，边下边报进度、下完校验 sha256 */
