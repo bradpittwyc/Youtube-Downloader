@@ -46,6 +46,8 @@ const state = {
   selected: new Set(),
   renderedCount: 0,
   queue: [],
+  /** 下载队列当前页码（每页固定 QUEUE_PAGE_SIZE 条） */
+  queuePage: 1,
   stats: {},
   settings: null,
   fetching: false,
@@ -654,12 +656,53 @@ function renderChannel(data) {
 
 const queueNodes = new Map();
 
+/**
+ * 队列每页固定显示多少条。
+ * 固定值（而不是"按窗口高度算能放几条"）是刻意的：窗口大小变化时条目不会跳来跳去，
+ * 翻页的含义也始终稳定 —— 第 2 页永远是第 9~16 条。
+ */
+const QUEUE_PAGE_SIZE = 8;
+
+/** 当前页的条目。页码越界时（条目被删光/清空）自动夹回合法范围。 */
+function queuePageItems() {
+  const pages = Math.max(1, Math.ceil(state.queue.length / QUEUE_PAGE_SIZE));
+  if (!Number.isFinite(state.queuePage) || state.queuePage < 1) state.queuePage = 1;
+  if (state.queuePage > pages) state.queuePage = pages;
+  const from = (state.queuePage - 1) * QUEUE_PAGE_SIZE;
+  return state.queue.slice(from, from + QUEUE_PAGE_SIZE);
+}
+
+/** 重新渲染翻页控件 */
+function renderQueuePager() {
+  const bar = $('queuePager');
+  const total = state.queue.length;
+  const pages = Math.max(1, Math.ceil(total / QUEUE_PAGE_SIZE));
+  // 只有一页时不显示翻页条 —— 没有可翻的，摆着只是噪音
+  bar.classList.toggle('hidden', total === 0 || pages <= 1);
+  if (bar.classList.contains('hidden')) return;
+  const from = (state.queuePage - 1) * QUEUE_PAGE_SIZE + 1;
+  const to = Math.min(total, state.queuePage * QUEUE_PAGE_SIZE);
+  $('qPageInfo').textContent = `${from}–${to} / ${total}　第 ${state.queuePage}/${pages} 页`;
+  $('qPagePrev').disabled = state.queuePage <= 1;
+  $('qPageNext').disabled = state.queuePage >= pages;
+}
+
+/** 翻页；dir = -1 上一页 / 1 下一页 */
+function gotoQueuePage(dir) {
+  const pages = Math.max(1, Math.ceil(state.queue.length / QUEUE_PAGE_SIZE));
+  const next = Math.min(pages, Math.max(1, state.queuePage + dir));
+  if (next === state.queuePage) return;
+  state.queuePage = next;
+  renderQueue(); // 页码变了 → queueNodes 里的旧行会被替换掉（下面的"清未使用节点"负责）
+}
+
 function renderQueue() {
   const list = $('queueList');
   $('queueEmpty').classList.toggle('hidden', state.queue.length > 0);
   const seen = new Set();
+  const pageItems = queuePageItems();
 
-  for (const q of state.queue) {
+  for (const q of pageItems) {
     seen.add(q.key);
     let el = queueNodes.get(q.key);
     if (!el) {
@@ -780,6 +823,8 @@ function renderQueue() {
       queueNodes.delete(key);
     }
   }
+
+  renderQueuePager();
 
   const s = state.stats || {};
   $('queueStats').innerHTML = [
@@ -1621,6 +1666,10 @@ function bind() {
     await api.queue.clear('done');
     toast('已清除已完成任务', 'ok');
   });
+
+  // 队列翻页（每页固定 8 条）
+  $('qPagePrev').addEventListener('click', () => gotoQueuePage(-1));
+  $('qPageNext').addEventListener('click', () => gotoQueuePage(1));
   $('btnQueueJump').addEventListener('click', () => {
     $('queuePane').scrollIntoView({ behavior: 'smooth' });
   });
@@ -1788,6 +1837,11 @@ function bind() {
   api.queue.onChanged((payload) => {
     state.queue = payload.items || [];
     state.stats = payload.stats || {};
+    // 【不要在这里推断「哪些是新条目」然后跳页】
+    // 曾经用「列表变长了 + 找第一个没见过的 key」来判断，结果页码会在启动时
+    // 自己跳来跳去（实测 1→2→1）——因为中途只要来一份条目较少的快照，
+    // queuePageItems() 的夹取就会把页码压回第 1 页。
+    // 现在改成：只有用户自己点「开始下载」时才翻页（见 enqueue），这里只负责渲染。
     invalidateDoneCache();
     renderQueue();
     // 有任务完成时：博主下载数会变，磁盘上也会多出边车文件，两处都刷新
@@ -1832,6 +1886,13 @@ async function enqueue(items) {
   // 只有真的跳过了重复项才提示一句 —— 那是用户看不到的信息。
   if (res.skipped) {
     toast(`已在队列中的 ${res.skipped} 个已跳过`, 'warn', 4000);
+  }
+  // 翻到第 1 页 —— 队列是按状态分组的（下载中 → 等待 → …），
+  // 刚加入的任务排在「下载中」之后，几乎总在第 1 页里。
+  // 用户点完「开始下载」立刻能看到它，不会以为没生效。
+  if (res.added > 0) {
+    state.queuePage = 1;
+    renderQueue();
   }
   $('queuePane').scrollIntoView({ behavior: 'smooth' });
 }

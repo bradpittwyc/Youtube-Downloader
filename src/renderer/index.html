@@ -158,6 +158,14 @@
 
         <div id="queueList" class="queue-list"></div>
         <div id="queueEmpty" class="queue-empty">队列为空<br /><span class="muted">勾选视频后点「开始下载」</span></div>
+
+        <!-- 队列翻页：固定每页 8 条，控件贴在区块右下角。
+             条数多了以后整列一直往下滚很难定位，翻页比无限滚动好找。 -->
+        <div id="queuePager" class="queue-pager hidden">
+          <span id="qPageInfo" class="q-page-info"></span>
+          <button id="qPagePrev" class="btn tiny" title="上一页">‹</button>
+          <button id="qPageNext" class="btn tiny" title="下一页">›</button>
+        </div>
       </aside>
     </main>
 
