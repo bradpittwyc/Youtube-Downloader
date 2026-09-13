@@ -1,5 +1,33 @@
 # 更新日志
 
+## v1.29.2 — 修掉版本号没出现在标题栏（事件挂错了对象）（2026-09-13）
+
+v1.29.0/v1.29.1 加了标题栏版本号，但**实测根本没生效** ——
+窗口标题一直是「YouTube 下载器」，版本号死活不出来。
+
+**根因**：`page-title-updated` 是 **BrowserWindow 的事件**，
+我挂到了 `mainWindow.webContents` 上，**不生效**。
+
+```js
+// ❌ 挂错对象，拦不住
+mainWindow.webContents.on('page-title-updated', (e) => e.preventDefault());
+
+// ✅ 正确
+mainWindow.on('page-title-updated', (e) => e.preventDefault());
+mainWindow.setTitle(`YouTube 下载器 v${app.getVersion()}`);
+```
+
+**为什么必须拦**：Electron 对带 `<title>` 的页面会**直接忽略** BrowserWindow 的 `title` 选项
+（官方文档明说），而 `index.html` 里的 `<title>` 是写死的「YouTube 下载器」。
+
+**实测**（开发模式快速验证，不用打包）：
+
+```
+窗口标题 = 「YouTube 下载器 v1.29.1」   ✅
+```
+
+---
+
 ## v1.29.1 — 检查更新加上退避重试（2026-09-13）
 
 实测遇到一次 **HTTP 403**：同一时刻用 curl 和 Node 直连都是 200

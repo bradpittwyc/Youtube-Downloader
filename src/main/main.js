@@ -1083,10 +1083,15 @@ function createWindow() {
     },
   });
 
-  // ⚠️ Electron 默认会用页面里的 <title> 覆盖窗口标题。
-  // index.html 里的 <title> 是写死的「YouTube 下载器」（没有版本号），
-  // 不拦住的话上面那行 title 会被它盖掉、版本号就没了。
-  mainWindow.webContents.on('page-title-updated', (e) => e.preventDefault());
+  // ⚠️ Electron 默认会用页面里的 <title> 覆盖窗口标题，而且是**直接忽略**上面那个
+  // title 选项。index.html 里的 <title> 是写死的「YouTube 下载器」（没有版本号），
+  // 所以必须拦住它，否则版本号根本显示不出来。
+  //
+  // 【踩过的坑】`page-title-updated` 是 **BrowserWindow** 的事件，
+  // 挂到 `mainWindow.webContents` 上不生效（webContents 上那个是另一回事）。
+  // 实测：挂错对象后窗口标题一直是「YouTube 下载器」，版本号死活不出来。
+  mainWindow.on('page-title-updated', (e) => e.preventDefault());
+  mainWindow.setTitle(`YouTube 下载器 v${app.getVersion()}`);
 
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
