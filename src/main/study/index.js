@@ -460,12 +460,16 @@ async function generateForVideo(o) {
     segments: res.segments,
     vocab: res.vocab || [],
     quotes,
+    takeaways: res.takeaways || [],
     failed: res.failed || [],
     stats: res.stats,
     usage: res.usage,
     // 结构分析退化成均分兜底时，takeaways 与 quotes 都是空的。
-    // 界面要据此提示「本次没有要点与金句」，别让用户只看到「没有金句图」却查不出原因。
-    fallbackPlan: !!(res.usage && res.usage.fallbackPlan),
+    //
+    // 【必须看本次的实际产出，不能看 usage.fallbackPlan】—— 那个标志是**原始生成时**
+    // 写进缓存的，后来补跑结构分析成功了它也不会被清掉，于是「修好了却一直报走兜底」
+    // （实测踩过：5 个视频补跑成功、金句都回来了，界面还全都在报 fallback）。
+    fallbackPlan: !(res.takeaways || []).length && !(res.quotes || []).length,
     summary: fromCache ? '使用翻译缓存重新排版' : summarize(res, cfg),
   };
 }

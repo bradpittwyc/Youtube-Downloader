@@ -465,8 +465,16 @@ function registerIpc() {
       item.studyDocPath = res.paths.docx || '';
       item.biSrtPath = res.paths.bilingualSrt || '';
       item.assPath = res.paths.ass || '';
+      // 【曾经漏了这两行】重做后不更新金句卡片信息，队列行就不会显示「N 张金句图」，
+      // 用户点完重做看不出到底修好没有（实测踩过）。
+      item.quoteCardDir = res.paths.quoteCards || '';
+      item.quoteCardCount = res.paths.quoteCardCount || 0;
       item.studyFromCache = !!res.fromCache;
       item.studySummary = res.summary;
+      // 依据【本次实际产出的内容】判断，而不是缓存里那个陈旧的 usage.fallbackPlan ——
+      // 那份 usage 是原始生成时写进缓存的，后来补跑成功也不会更新它，
+      // 于是修好了仍然一直显示「走兜底」（实测踩过）。
+      item.studyNoQuotes = !(res.takeaways || []).length && !(res.quotes || []).length;
       item.studyCost = 0;
       if (force) study.clearCache(item.id, srt);
       return {
@@ -474,9 +482,7 @@ function registerIpc() {
         paths: res.paths,
         summary: res.summary,
         fromCache: res.fromCache,
-        // 让界面能当场告诉用户「这次有没有金句」—— 结构分析失败时金句为 0，
-        // 点完「重做」立刻就能看出修没修好，不用去翻文档。
-        fallbackPlan: !!res.fallbackPlan,
+        fallbackPlan: !(res.takeaways || []).length && !(res.quotes || []).length,
         quoteCount: (res.quotes || []).length,
       };
     } catch (err) {

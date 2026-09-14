@@ -525,7 +525,10 @@ function summarize(res, cfg) {
   // 【必须显式说出来】结构分析失败时会退化成均分兜底，同时 takeaways 与 quotes 全空 ——
   // 表现为「文档里没有要点和金句、也不生成金句图」。
   // 以前这条路径完全静默，用户只能看到结果不对、查不出原因（v1.29.2 实测踩过）。
-  if (res.usage && res.usage.fallbackPlan) {
+  //
+  // 判据用**本次的实际产出**而不是 res.usage.fallbackPlan：后者是原始生成时写进缓存的
+  // 陈旧标志，补跑成功也不会清掉，会一直误报（实测：5 个视频金句都补回来了仍全在报兜底）。
+  if (!(res.takeaways || []).length && !(res.quotes || []).length) {
     parts.push('⚠ 结构分析失败，已用均分兜底：本次没有「要点」与「金句」（可点「重做」重试）');
   }
   return parts.join(' · ');
