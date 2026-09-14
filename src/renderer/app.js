@@ -1948,8 +1948,21 @@ function bind() {
       const force = !!e.ctrlKey;
       toast(force ? '正在重新翻译并生成（会调用大模型）…' : '正在生成学习文档…', 'ok', 2500);
       const r = await api.study.generate(key, force);
-      if (r.ok) toast(r.fromCache ? '已用翻译缓存重新排版完成' : '学习文档生成完成', 'ok', 6000);
-      else toast('生成失败：' + r.error, 'err', 9000);
+      if (r.ok) {
+        // 把金句数一并说出来：结构分析失败时金句会是 0，用户当场就能看出没修好
+        const extra = r.fallbackPlan
+          ? '　⚠ 但结构分析失败，本次没有要点与金句'
+          : r.quoteCount
+          ? `　（${r.quoteCount} 条金句）`
+          : '';
+        toast(
+          (r.fromCache ? '已用翻译缓存重新排版完成' : '学习文档生成完成') + extra,
+          r.fallbackPlan ? 'warn' : 'ok',
+          r.fallbackPlan ? 9000 : 6000
+        );
+      } else {
+        toast('生成失败：' + r.error, 'err', 9000);
+      }
       return;
     }
     await api.queue.action(key, act);

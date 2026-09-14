@@ -469,7 +469,16 @@ function registerIpc() {
       item.studySummary = res.summary;
       item.studyCost = 0;
       if (force) study.clearCache(item.id, srt);
-      return { ok: true, paths: res.paths, summary: res.summary, fromCache: res.fromCache };
+      return {
+        ok: true,
+        paths: res.paths,
+        summary: res.summary,
+        fromCache: res.fromCache,
+        // 让界面能当场告诉用户「这次有没有金句」—— 结构分析失败时金句为 0，
+        // 点完「重做」立刻就能看出修没修好，不用去翻文档。
+        fallbackPlan: !!res.fallbackPlan,
+        quoteCount: (res.quotes || []).length,
+      };
     } catch (err) {
       item.studyError = String((err && err.message) || err).slice(0, 300);
       return { ok: false, error: item.studyError };

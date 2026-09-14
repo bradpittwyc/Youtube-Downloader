@@ -1340,6 +1340,9 @@ class DownloadQueue extends EventEmitter {
       item.quoteCardCount = res.paths.quoteCardCount || 0;
       item.studyFromCache = !!res.fromCache;
       item.studySummary = res.summary;
+      // 结构分析退化成兜底时，本次文档没有「要点」与「金句」、也不会出金句图。
+      // 记下来让阶段文字里带个标记，否则用户只知道结果不对、不知道原因。
+      item.studyNoQuotes = !!res.fallbackPlan;
       item.studyError = '';
       // 命中缓存不产生费用
       item.studyCost = res.fromCache ? 0 : est.costCny;
@@ -1365,6 +1368,9 @@ class DownloadQueue extends EventEmitter {
     // 金句卡片现在随文档自动产出，在阶段文字里体现出来，
     // 否则用户不知道图片在哪、还会去找那个已经删掉的按钮
     if (item.quoteCardCount) bits.push(`${item.quoteCardCount} 张金句图`);
+    // 结构分析退化过 → 明确标出来。不标的话用户只能看出「少了金句图」，
+    // 完全不知道是模型那一步失败了、也不知道点「重做」可以重试。
+    if (item.studyNoQuotes) bits.push('⚠ 无要点/金句');
     return bits.length > 1 ? `已完成（${bits.join(' + ')}）` : '已完成';
   }
 

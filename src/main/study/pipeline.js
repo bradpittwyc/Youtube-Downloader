@@ -212,7 +212,16 @@ async function runStudyPipeline(o) {
           { role: 'system', content: llm.STRUCT_SYSTEM },
           { role: 'user', content: userContent },
         ],
-        4096
+        8192,
+        // 【必须关思考】这一步要输出「完整分段计划 + 要点 + 金句」，而模型一思考就是
+        // 4000~8700 个 token，且思考也算进 max_tokens。实测同一份 2046 条字幕：
+        //   4096 开思考  → 截断
+        //   8192 开思考  → 照样截断（思考吃了 8193）
+        //   16384 开思考 → 能成，但要 41 秒、烧 8649 个思考 token
+        //   4096 关思考  → 6 秒成功，plan 24 段 / takeaways 5 / quotes 6
+        // 更阴的是它**间歇性**：三次尝试都截断就静默退化成兜底均分，
+        // takeaways 与 quotes 全空 —— 用户只会看到「没有金句图」，查不出原因。
+        { reasoning: 'off' }
       );
       usage.prompt += r.usage.prompt_tokens || 0;
       usage.completion += r.usage.completion_tokens || 0;
@@ -505,14 +514,21 @@ async function runStudyPipeline(o) {
 /** 汇总报告用的简要统计行 */
 function summarize(res, cfg) {
   const s = res.stats;
-  return [
+  const parts = [
     `模型 ${cfg.model}`,
     `字幕 ${s.raw} 条 → 清洗 ${s.final} 条（丢重复 ${s.dropped}）`,
     `分段 ${s.segments} 段${s.failedSegments ? `（失败 ${s.failedSegments}）` : ''}`,
     `调用 ${res.usage.calls} 次（补漏 ${res.usage.repairs}、拆半 ${res.usage.splits}）`,
     `token 输入 ${res.usage.prompt} / 输出 ${res.usage.completion}`,
     `耗时 ${(s.elapsedMs / 1000).toFixed(1)}s`,
-  ].join(' · ');
+  ];
+  // 【必须显式说出来】结构分析失败时会退化成均分兜底，同时 takeaways 与 quotes 全空 ——
+  // 表现为「文档里没有要点和金句、也不生成金句图」。
+  // 以前这条路径完全静默，用户只能看到结果不对、查不出原因（v1.29.2 实测踩过）。
+  if (res.usage && res.usage.fallbackPlan) {
+    parts.push('⚠ 结构分析失败，已用均分兜底：本次没有「要点」与「金句」（可点「重做」重试）');
+  }
+  return parts.join(' · ');
 }
 
 /** 毫秒 → h:mm:ss（金句旁边标时间码，方便回看原片） */
@@ -580,7 +596,9 @@ async function runSummaryOnly(o) {
           { role: 'system', content: llm.STRUCT_SYSTEM },
           { role: 'user', content: userContent },
         ],
-        4096
+        8192,
+        // 同 runStudyPipeline：结构分析必须关思考，否则会被自己的思考撑爆 max_tokens
+        { reasoning: 'off' }
       );
       usage.prompt += r.usage.prompt_tokens || 0;
       usage.completion += r.usage.completion_tokens || 0;

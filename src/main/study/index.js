@@ -135,6 +135,21 @@ function readCache(videoId, srtPath, model, opts) {
     // 没有这个标记的（早期版本写的，或补总结时失败留下的）一律当作不完整，
     // 走「复用翻译 + 只补总结」的轻量路径，而不是直接拿来用导致文档缺内容。
     if (j.summaryDone !== true && !(opts && opts.allowStale)) return null;
+    // 【自愈】summaryDone 说「总结已完成」，但要点与金句都是空的 —— 这份缓存是坏的。
+    //
+    // 实测成因：结构分析那一步开着「思考」，思考量把 max_tokens 撑爆 → 三次尝试全部
+    // 截断 → 退化成均分兜底，此时 takeaways 与 quotes 全空，可 summaryDone 照样被写上。
+    // 结果是文档没有要点/金句、也不出金句图，而缓存却判定「命中、无需重跑」。
+    // 这里把它当成不完整，让它走轻量路径只补一次结构分析（1 次调用，很便宜）。
+    if (
+      j.summaryDone === true &&
+      !(opts && opts.allowStale) &&
+      !(j.takeaways || []).length &&
+      !(j.quotes || []).length
+    ) {
+      console.warn('[study] 缓存里要点与金句都是空的，按不完整处理（只补跑一次结构分析）');
+      return null;
+    }
     if (!j.segments || !j.segments.length) return null;
     return j;
   } catch (_) {
@@ -448,6 +463,9 @@ async function generateForVideo(o) {
     failed: res.failed || [],
     stats: res.stats,
     usage: res.usage,
+    // 结构分析退化成均分兜底时，takeaways 与 quotes 都是空的。
+    // 界面要据此提示「本次没有要点与金句」，别让用户只看到「没有金句图」却查不出原因。
+    fallbackPlan: !!(res.usage && res.usage.fallbackPlan),
     summary: fromCache ? '使用翻译缓存重新排版' : summarize(res, cfg),
   };
 }
